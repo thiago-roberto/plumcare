@@ -1,0 +1,36 @@
+.pageTitle {
+  color: #333;
+}
+
+.addButton {
+  background: #ff5500;
+}
+
+.addButton:hover {
+  background: #e64d00;
+}
+
+.filterCard {
+  background-color: #fff;
+  border-color: #f0ebe0;
+}
+
+.statCard {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background-color: #fff;
+  border-color: #f0ebe0;
+}
+
+.statCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.patientRow {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.patientRow:hover {
+  background-color: #fff8f0;
+}

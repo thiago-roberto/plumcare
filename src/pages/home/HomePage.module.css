@@ -1,0 +1,157 @@
+.hero {
+  background: #fff;
+  border: 1px solid #f0ebe0;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(135deg, #fff8f0 0%, transparent 100%);
+  pointer-events: none;
+}
+
+.heroLabel {
+  color: #ff5500;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+}
+
+.heroTitle {
+  color: #333;
+  font-size: 2.5rem;
+  line-height: 1.2;
+  margin-bottom: 16px;
+}
+
+.heroHighlight {
+  color: #ff5500;
+}
+
+.heroDescription {
+  color: #666;
+  font-size: 1rem;
+  max-width: 500px;
+  line-height: 1.6;
+}
+
+.heroButton {
+  background: #ff5500;
+  color: #fff;
+  font-weight: 600;
+  border: none;
+}
+
+.heroButton:hover {
+  background: #e64d00;
+}
+
+.heroButtonOutline {
+  border-color: #ff5500;
+  color: #ff5500;
+}
+
+.heroButtonOutline:hover {
+  background: #fff8f0;
+}
+
+.heroStats {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.statCircle {
+  text-align: center;
+}
+
+.statCard {
+  background: #fff;
+  border-color: #f0ebe0;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.statCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(255, 85, 0, 0.1);
+}
+
+.statValue {
+  color: #333;
+  line-height: 1.2;
+}
+
+.statValueGreen {
+  color: #0d9488;
+  line-height: 1.2;
+}
+
+.statIconGreen {
+  background: #0d9488;
+  color: #fff;
+}
+
+.statIconBlue {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.statIconPurple {
+  background: #8b5cf6;
+  color: #fff;
+}
+
+.statIconOrange {
+  background: #ff5500;
+  color: #fff;
+}
+
+.sectionTitle {
+  color: #333;
+}
+
+.refreshButton {
+  color: #ff5500;
+}
+
+.refreshButton:hover {
+  background: #fff8f0;
+}
+
+.ehrCard {
+  background: #fff;
+  border-color: #f0ebe0;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ehrCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.ehrDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.quickActions {
+  background: #ff5500;
+}

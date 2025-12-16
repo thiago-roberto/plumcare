@@ -1,0 +1,28 @@
+.card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  height: 100%;
+  background: #fff;
+  border-color: #f0ebe0;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(255, 85, 0, 0.1);
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.capabilities {
+  padding-top: 8px;
+}

@@ -1,0 +1,33 @@
+.pageTitle {
+  color: #333;
+}
+
+.formCard {
+  background-color: #fff;
+  border-color: #f0ebe0;
+}
+
+.stepper {
+  --stepper-icon-size: 36px;
+}
+
+.nextButton {
+  background: #ff5500;
+}
+
+.nextButton:hover {
+  background: #e64d00;
+}
+
+.submitButton {
+  background: #ff5500;
+}
+
+.submitButton:hover {
+  background: #e64d00;
+}
+
+.successIcon {
+  background: #10b981;
+  color: #fff;
+}

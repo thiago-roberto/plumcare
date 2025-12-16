@@ -1,0 +1,84 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #fffdf7;
+}
+
+.header {
+  height: 64px;
+  background: #fff;
+  border-bottom: 1px solid #f0ebe0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.logo:hover {
+  opacity: 0.8;
+}
+
+.logoIcon {
+  background: #ff5500;
+  color: #fff;
+}
+
+.logoText {
+  color: #ff5500;
+  letter-spacing: -0.02em;
+}
+
+.tabsRoot {
+  height: 100%;
+}
+
+.tabsList {
+  height: 100%;
+  gap: 4px;
+  border: none;
+  background: transparent;
+}
+
+.tab {
+  color: #666;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+}
+
+.tab:hover {
+  color: #333;
+  background: #fff8f0;
+}
+
+.tab[data-active] {
+  color: #fff;
+  background: #ff5500;
+  font-weight: 600;
+}
+
+.tab[data-active]:hover {
+  background: #e64d00;
+}
+
+.signOutButton {
+  color: #666;
+}
+
+.signOutButton:hover {
+  color: #333;
+  background: #fff8f0;
+}
+
+.main {
+  flex: 1;
+  background: #fffdf7;
+}

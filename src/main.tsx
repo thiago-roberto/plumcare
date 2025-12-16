@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { MantineProvider, createTheme } from '@mantine/core';
+import { MantineProvider, createTheme, mergeMantineTheme, DEFAULT_THEME } from '@mantine/core';
+import { plumcareTheme } from './theme/plumcare';
 import '@mantine/core/styles.css';
 import { Notifications } from '@mantine/notifications';
 import '@mantine/notifications/styles.css';
@@ -20,24 +21,7 @@ const medplum = new MedplumClient({
   autoBatchTime: 100,
 });
 
-const theme = createTheme({
-  headings: {
-    sizes: {
-      h1: {
-        fontSize: '1.125rem',
-        fontWeight: '500',
-        lineHeight: '2.0',
-      },
-    },
-  },
-  fontSizes: {
-    xs: '0.6875rem',
-    sm: '0.875rem',
-    md: '0.875rem',
-    lg: '1.0rem',
-    xl: '1.125rem',
-  },
-});
+const theme = mergeMantineTheme(DEFAULT_THEME, createTheme(plumcareTheme));
 
 const router = createBrowserRouter([{ path: '*', element: <App /> }]);
 

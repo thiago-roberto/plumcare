@@ -1,0 +1,27 @@
+.pageTitle {
+  color: #333;
+}
+
+.statCard {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background-color: #fff;
+  border-color: #f0ebe0;
+}
+
+.statCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
