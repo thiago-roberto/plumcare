@@ -1,0 +1,29 @@
+{
+  "port": 3000,
+  "baseUrl": "http://localhost:3000/",
+  "appBaseUrl": "http://localhost:4000/",
+  "binaryStorage": "file:/usr/src/medplum/binary/",
+  "storageBaseUrl": "http://localhost:3000/storage/",
+  "allowedOrigins": "*",
+  "logLevel": "INFO",
+  "logRequests": true,
+  "registerEnabled": true,
+  "introspectionEnabled": true,
+  "maxJsonSize": "1mb",
+  "maxBatchSize": "50mb",
+  "vmContextBotsEnabled": true,
+  "defaultBotRuntimeVersion": "vmcontext",
+  "shutdownTimeoutMilliseconds": 30000,
+  "database": {
+    "host": "postgres",
+    "port": 5432,
+    "dbname": "medplum",
+    "username": "medplum",
+    "password": "medplum"
+  },
+  "redis": {
+    "host": "redis",
+    "port": 6379,
+    "password": "medplum"
+  }
+}

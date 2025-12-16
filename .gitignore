@@ -7,11 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build outputs
 dist
 dist-ssr
 *.local
-package-lock.json
+
+# Lock files (tracked at root level only in monorepo)
+apps/*/package-lock.json
+packages/*/package-lock.json
 
 # Editor directories and files
 .vscode/*
@@ -23,3 +29,16 @@ package-lock.json
 *.njsproj
 *.sln
 *.sw?
+
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# Docker volumes (if using bind mounts)
+infra/postgres/data
+infra/redis/data
+infra/medplum/binary
+
+# OS files
+Thumbs.db
