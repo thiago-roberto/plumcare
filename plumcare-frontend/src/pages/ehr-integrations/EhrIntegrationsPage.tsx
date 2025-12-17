@@ -20,35 +20,100 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
+import type { Patient, Encounter } from '@medplum/fhirtypes';
+import { useMedplum } from '@medplum/react';
 import {
   IconActivity,
   IconAlertCircle,
   IconCheck,
   IconCloudUpload,
   IconDatabase,
-  IconLoader,
   IconPlugConnected,
   IconRefresh,
   IconUsers,
 } from '@tabler/icons-react';
 import type { JSX } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  getEhrConnections,
-  getSyncEvents,
   syncMockData,
   ehrSystemMeta,
-  type EhrConnection,
-  type SyncEvent,
+  type EhrSystem,
   type MockDataSyncResponse,
 } from '../../services/ehrApi';
-import { EhrConnectionCard } from '../../components/ehr/EhrConnectionCard';
-import { SyncActivityFeed } from '../../components/ehr/SyncActivityFeed';
 import classes from './EhrIntegrationsPage.module.css';
 
+const EHR_SOURCE_SYSTEM = 'http://plumcare.io/ehr-source';
+const EHR_SYSTEMS: EhrSystem[] = ['athena', 'elation', 'nextgen'];
+
+interface EhrStats {
+  system: EhrSystem;
+  patientCount: number;
+  encounterCount: number;
+  observationCount: number;
+  conditionCount: number;
+  status: 'connected' | 'disconnected';
+}
+
+interface SyncActivity {
+  id: string;
+  timestamp: string;
+  success: boolean;
+  totalResources: number;
+  summary: {
+    athena: { patients: number; encounters: number };
+    elation: { patients: number; encounters: number };
+    nextgen: { patients: number; encounters: number };
+  };
+}
+
+// Load sync history from localStorage
+function loadSyncHistory(): SyncActivity[] {
+  try {
+    const stored = localStorage.getItem('plumcare-sync-history');
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Save sync history to localStorage
+function saveSyncHistory(history: SyncActivity[]): void {
+  try {
+    // Keep only last 10 syncs
+    const trimmed = history.slice(0, 10);
+    localStorage.setItem('plumcare-sync-history', JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+// Format time ago
+function getTimeAgo(timestamp: string): string {
+  const now = new Date();
+  const then = new Date(timestamp);
+  const diffMs = now.getTime() - then.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSecs < 60) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
+function getEhrSource(resource: Patient | Encounter): EhrSystem | null {
+  const tag = resource.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
+  if (tag?.code && EHR_SYSTEMS.includes(tag.code as EhrSystem)) {
+    return tag.code as EhrSystem;
+  }
+  return null;
+}
+
 export function EhrIntegrationsPage(): JSX.Element {
-  const [connections, setConnections] = useState<EhrConnection[]>([]);
-  const [syncEvents, setSyncEvents] = useState<SyncEvent[]>([]);
+  const medplum = useMedplum();
+  const [ehrStats, setEhrStats] = useState<EhrStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,26 +123,73 @@ export function EhrIntegrationsPage(): JSX.Element {
   const [patientCount, setPatientCount] = useState<number>(3);
   const [includeAllData, setIncludeAllData] = useState(true);
   const [syncResult, setSyncResult] = useState<MockDataSyncResponse | null>(null);
+  const [syncHistory, setSyncHistory] = useState<SyncActivity[]>(() => loadSyncHistory());
+
+  const fetchStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch resources from Medplum
+      const [patients, encounters, observations, conditions] = await Promise.all([
+        medplum.searchResources('Patient', { _count: '500' }),
+        medplum.searchResources('Encounter', { _count: '500' }),
+        medplum.searchResources('Observation', { _count: '500' }),
+        medplum.searchResources('Condition', { _count: '500' }),
+      ]);
+
+      // Count by EHR source
+      const counts: Record<EhrSystem, { patients: number; encounters: number; observations: number; conditions: number }> = {
+        athena: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
+        elation: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
+        nextgen: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
+        medplum: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
+      };
+
+      patients.forEach(p => {
+        const source = getEhrSource(p);
+        if (source) counts[source].patients++;
+      });
+
+      encounters.forEach(e => {
+        const source = getEhrSource(e);
+        if (source) counts[source].encounters++;
+      });
+
+      observations.forEach(o => {
+        const tag = o.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
+        if (tag?.code && EHR_SYSTEMS.includes(tag.code as EhrSystem)) {
+          counts[tag.code as EhrSystem].observations++;
+        }
+      });
+
+      conditions.forEach(c => {
+        const tag = c.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
+        if (tag?.code && EHR_SYSTEMS.includes(tag.code as EhrSystem)) {
+          counts[tag.code as EhrSystem].conditions++;
+        }
+      });
+
+      const stats: EhrStats[] = EHR_SYSTEMS.map(system => ({
+        system,
+        patientCount: counts[system].patients,
+        encounterCount: counts[system].encounters,
+        observationCount: counts[system].observations,
+        conditionCount: counts[system].conditions,
+        status: counts[system].patients > 0 ? 'connected' : 'disconnected',
+      }));
+
+      setEhrStats(stats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }, [medplum]);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        setLoading(true);
-        const [connectionsData, syncData] = await Promise.all([
-          getEhrConnections(),
-          getSyncEvents({ limit: 10 }),
-        ]);
-        setConnections(connectionsData);
-        setSyncEvents(syncData.events);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, []);
+    fetchStats();
+  }, [fetchStats]);
 
   // Handle mock data sync
   const handleSyncMockData = async () => {
@@ -86,9 +198,25 @@ export function EhrIntegrationsPage(): JSX.Element {
       setSyncResult(null);
       const result = await syncMockData({ patientCount, includeAllData });
       setSyncResult(result);
-      // Refresh connections after sync
-      const connectionsData = await getEhrConnections();
-      setConnections(connectionsData);
+
+      // Add to sync history
+      const activity: SyncActivity = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        success: result.success,
+        totalResources: result.totalResources,
+        summary: {
+          athena: { patients: result.summary.athena.patients, encounters: result.summary.athena.encounters },
+          elation: { patients: result.summary.elation.patients, encounters: result.summary.elation.encounters },
+          nextgen: { patients: result.summary.nextgen.patients, encounters: result.summary.nextgen.encounters },
+        },
+      };
+      const newHistory = [activity, ...syncHistory];
+      setSyncHistory(newHistory);
+      saveSyncHistory(newHistory);
+
+      // Refresh stats after sync
+      await fetchStats();
     } catch (err) {
       setSyncResult({
         success: false,
@@ -105,14 +233,11 @@ export function EhrIntegrationsPage(): JSX.Element {
     }
   };
 
-  // Calculate stats from connections
-  const stats = {
-    connectedSystems: connections.filter(c => c.status === 'connected' || c.status === 'syncing').length,
-    totalSystems: connections.length || 3,
-    totalPatients: connections.reduce((sum, c) => sum + c.patientCount, 0),
-    totalEncounters: connections.reduce((sum, c) => sum + c.encounterCount, 0),
-    totalPending: connections.reduce((sum, c) => sum + c.pendingRecords, 0),
-  };
+  // Calculate totals
+  const totalPatients = ehrStats.reduce((sum, s) => sum + s.patientCount, 0);
+  const totalEncounters = ehrStats.reduce((sum, s) => sum + s.encounterCount, 0);
+  const totalObservations = ehrStats.reduce((sum, s) => sum + s.observationCount, 0);
+  const connectedSystems = ehrStats.filter(s => s.status === 'connected').length;
 
   if (loading) {
     return (
@@ -143,14 +268,23 @@ export function EhrIntegrationsPage(): JSX.Element {
               Manage FHIR + HL7 integrations with Athena, Elation, and NextGen EHR systems
             </Text>
           </Box>
-          <Button
-            leftSection={<IconDatabase size={16} />}
-            variant="light"
-            color="violet"
-            onClick={() => setSyncModalOpen(true)}
-          >
-            Sync Mock Data
-          </Button>
+          <Group>
+            <Button
+              leftSection={<IconRefresh size={16} />}
+              variant="subtle"
+              onClick={fetchStats}
+            >
+              Refresh
+            </Button>
+            <Button
+              leftSection={<IconDatabase size={16} />}
+              variant="light"
+              color="violet"
+              onClick={() => setSyncModalOpen(true)}
+            >
+              Sync Mock Data
+            </Button>
+          </Group>
         </Group>
 
         {/* Mock Data Sync Modal */}
@@ -286,14 +420,14 @@ export function EhrIntegrationsPage(): JSX.Element {
                     Connected Systems
                   </Text>
                   <Text fw={700} size="xl">
-                    {stats.connectedSystems}/{stats.totalSystems}
+                    {connectedSystems}/3
                   </Text>
                 </div>
                 <ThemeIcon color="teal" variant="light" size="lg" radius="md">
                   <IconPlugConnected size={20} />
                 </ThemeIcon>
               </Group>
-              <Progress value={(stats.connectedSystems / stats.totalSystems) * 100} mt="md" size="sm" color="teal" />
+              <Progress value={(connectedSystems / 3) * 100} mt="md" size="sm" color="teal" />
             </Paper>
           </Grid.Col>
 
@@ -305,7 +439,7 @@ export function EhrIntegrationsPage(): JSX.Element {
                     Total Patients
                   </Text>
                   <Text fw={700} size="xl">
-                    {stats.totalPatients.toLocaleString()}
+                    {totalPatients.toLocaleString()}
                   </Text>
                 </div>
                 <ThemeIcon color="blue" variant="light" size="lg" radius="md">
@@ -326,7 +460,7 @@ export function EhrIntegrationsPage(): JSX.Element {
                     Total Encounters
                   </Text>
                   <Text fw={700} size="xl">
-                    {stats.totalEncounters.toLocaleString()}
+                    {totalEncounters.toLocaleString()}
                   </Text>
                 </div>
                 <ThemeIcon color="violet" variant="light" size="lg" radius="md">
@@ -344,18 +478,18 @@ export function EhrIntegrationsPage(): JSX.Element {
               <Group justify="space-between">
                 <div>
                   <Text c="dimmed" size="xs" tt="uppercase" fw={700}>
-                    Pending Records
+                    Observations
                   </Text>
                   <Text fw={700} size="xl">
-                    {stats.totalPending}
+                    {totalObservations.toLocaleString()}
                   </Text>
                 </div>
-                <ThemeIcon color={stats.totalPending > 100 ? 'orange' : 'gray'} variant="light" size="lg" radius="md">
+                <ThemeIcon color="orange" variant="light" size="lg" radius="md">
                   <IconCloudUpload size={20} />
                 </ThemeIcon>
               </Group>
               <Text size="xs" c="dimmed" mt="md">
-                Awaiting synchronization
+                Vitals, labs, and results
               </Text>
             </Paper>
           </Grid.Col>
@@ -367,63 +501,124 @@ export function EhrIntegrationsPage(): JSX.Element {
             EHR Connections
           </Title>
           <Grid>
-            {connections.map((connection) => (
-              <Grid.Col key={connection.id} span={{ base: 12, md: 4 }}>
-                <EhrConnectionCard connection={connection} />
-              </Grid.Col>
-            ))}
+            {ehrStats.map((stats) => {
+              const meta = ehrSystemMeta[stats.system];
+              return (
+                <Grid.Col key={stats.system} span={{ base: 12, md: 4 }}>
+                  <Card withBorder padding="lg" radius="md">
+                    <Group justify="space-between" mb="md">
+                      <Group gap="sm">
+                        <ThemeIcon size={40} radius="md" style={{ backgroundColor: meta.color + '20' }}>
+                          <Text fw={700} c={meta.color}>{stats.system.charAt(0).toUpperCase()}</Text>
+                        </ThemeIcon>
+                        <div>
+                          <Text fw={600}>{meta.name}</Text>
+                          <Text size="xs" c="dimmed">FHIR R4</Text>
+                        </div>
+                      </Group>
+                      <Badge
+                        color={stats.status === 'connected' ? 'teal' : 'gray'}
+                        variant="light"
+                        leftSection={stats.status === 'connected' ? <IconCheck size={12} /> : null}
+                      >
+                        {stats.status === 'connected' ? 'Connected' : 'No Data'}
+                      </Badge>
+                    </Group>
+
+                    <Text size="sm" c="dimmed" mb="md">
+                      {meta.description}
+                    </Text>
+
+                    <Grid gutter="md">
+                      <Grid.Col span={6}>
+                        <Text size="xs" c="dimmed">Patients</Text>
+                        <Text fw={600}>{stats.patientCount.toLocaleString()}</Text>
+                      </Grid.Col>
+                      <Grid.Col span={6}>
+                        <Text size="xs" c="dimmed">Encounters</Text>
+                        <Text fw={600}>{stats.encounterCount.toLocaleString()}</Text>
+                      </Grid.Col>
+                      <Grid.Col span={6}>
+                        <Text size="xs" c="dimmed">Observations</Text>
+                        <Text fw={600}>{stats.observationCount.toLocaleString()}</Text>
+                      </Grid.Col>
+                      <Grid.Col span={6}>
+                        <Text size="xs" c="dimmed">Conditions</Text>
+                        <Text fw={600}>{stats.conditionCount.toLocaleString()}</Text>
+                      </Grid.Col>
+                    </Grid>
+
+                    <Text size="xs" c="dimmed" mt="md">
+                      {stats.patientCount > 0 ? `${stats.patientCount} patients synced` : 'No data synced yet'}
+                    </Text>
+                  </Card>
+                </Grid.Col>
+              );
+            })}
           </Grid>
         </Box>
 
-        {/* Sync Activity and FHIR Capabilities */}
-        <Grid>
-          <Grid.Col span={{ base: 12, lg: 7 }}>
-            <Paper p="md" radius="md" withBorder>
-              <Group justify="space-between" mb="md">
-                <Title order={3} size="h4">
-                  Recent Sync Activity
-                </Title>
-                <Badge variant="light" color="blue" leftSection={<IconActivity size={12} />}>
-                  Live
-                </Badge>
-              </Group>
-              <SyncActivityFeed events={syncEvents} />
-            </Paper>
-          </Grid.Col>
-
-          <Grid.Col span={{ base: 12, lg: 5 }}>
-            <Paper p="md" radius="md" withBorder h="100%">
-              <Title order={3} size="h4" mb="md">
-                FHIR Resource Support
+        {/* Recent Sync Activity */}
+        {syncHistory.length > 0 && (
+          <Paper p="md" radius="md" withBorder>
+            <Group justify="space-between" mb="md">
+              <Title order={3} size="h4">
+                Recent Sync Activity
               </Title>
-              <Stack gap="sm">
-                {['Patient', 'Encounter', 'Observation', 'Condition', 'DiagnosticReport', 'MedicationRequest'].map(
-                  (resource) => {
-                    const supportedBy = connections.filter((c) => c.capabilities.includes(resource));
-                    return (
-                      <Group key={resource} justify="space-between">
-                        <Text size="sm">{resource}</Text>
+              <Badge variant="light" color="teal" leftSection={<IconActivity size={12} />}>
+                {syncHistory.length} syncs
+              </Badge>
+            </Group>
+            <Stack gap="sm">
+              {syncHistory.slice(0, 5).map((activity) => {
+                const timeAgo = getTimeAgo(activity.timestamp);
+                return (
+                  <Paper key={activity.id} p="sm" withBorder radius="sm" bg={activity.success ? 'teal.0' : 'red.0'}>
+                    <Group justify="space-between">
+                      <Group gap="sm">
+                        <ThemeIcon
+                          size="sm"
+                          radius="xl"
+                          color={activity.success ? 'teal' : 'red'}
+                          variant="filled"
+                        >
+                          {activity.success ? <IconCheck size={12} /> : <IconAlertCircle size={12} />}
+                        </ThemeIcon>
+                        <div>
+                          <Text size="sm" fw={500}>
+                            {activity.success ? 'Sync Complete' : 'Sync Failed'}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {activity.totalResources} resources synced
+                          </Text>
+                        </div>
+                      </Group>
+                      <div style={{ textAlign: 'right' }}>
                         <Group gap="xs">
-                          {connections.map((conn) => (
-                            <Tooltip key={conn.id} label={ehrSystemMeta[conn.system].name}>
-                              <Badge
-                                size="xs"
-                                variant={conn.capabilities.includes(resource) ? 'filled' : 'light'}
-                                color={conn.capabilities.includes(resource) ? 'teal' : 'gray'}
-                              >
-                                {conn.system.charAt(0).toUpperCase()}
+                          {(['athena', 'elation', 'nextgen'] as const).map((ehr) => (
+                            <Tooltip key={ehr} label={`${ehrSystemMeta[ehr].name}: ${activity.summary[ehr].patients} patients`}>
+                              <Badge size="xs" variant="light" color={ehrSystemMeta[ehr].color}>
+                                {ehr.charAt(0).toUpperCase()}: {activity.summary[ehr].patients}
                               </Badge>
                             </Tooltip>
                           ))}
                         </Group>
-                      </Group>
-                    );
-                  }
-                )}
-              </Stack>
-            </Paper>
-          </Grid.Col>
-        </Grid>
+                        <Text size="xs" c="dimmed" mt={4}>
+                          {timeAgo}
+                        </Text>
+                      </div>
+                    </Group>
+                  </Paper>
+                );
+              })}
+            </Stack>
+            {syncHistory.length > 5 && (
+              <Text size="xs" c="dimmed" ta="center" mt="sm">
+                + {syncHistory.length - 5} more syncs
+              </Text>
+            )}
+          </Paper>
+        )}
 
         {/* Integration Health */}
         <Paper p="md" radius="md" withBorder>
@@ -431,26 +626,19 @@ export function EhrIntegrationsPage(): JSX.Element {
             Integration Health Overview
           </Title>
           <Grid>
-            {connections.map((connection) => {
-              const meta = ehrSystemMeta[connection.system];
-              const healthScore =
-                connection.status === 'connected'
-                  ? 100
-                  : connection.status === 'syncing'
-                    ? 85
-                    : connection.status === 'error'
-                      ? 30
-                      : 0;
+            {ehrStats.map((stats) => {
+              const meta = ehrSystemMeta[stats.system];
+              const healthScore = stats.status === 'connected' ? 100 : 0;
 
               return (
-                <Grid.Col key={connection.id} span={{ base: 12, sm: 4 }}>
+                <Grid.Col key={stats.system} span={{ base: 12, sm: 4 }}>
                   <Card withBorder padding="lg" radius="md">
                     <Flex direction="column" align="center" gap="md">
                       <RingProgress
                         size={100}
                         thickness={10}
                         roundCaps
-                        sections={[{ value: healthScore, color: healthScore > 80 ? 'teal' : healthScore > 50 ? 'orange' : 'red' }]}
+                        sections={[{ value: healthScore, color: healthScore > 0 ? 'teal' : 'gray' }]}
                         label={
                           <Text ta="center" fw={700} size="lg">
                             {healthScore}%
@@ -460,31 +648,15 @@ export function EhrIntegrationsPage(): JSX.Element {
                       <div style={{ textAlign: 'center' }}>
                         <Text fw={600}>{meta.name}</Text>
                         <Text size="xs" c="dimmed">
-                          Last sync: {new Date(connection.lastSync).toLocaleTimeString()}
+                          {stats.patientCount} patients
                         </Text>
                       </div>
                       <Badge
-                        color={
-                          connection.status === 'connected'
-                            ? 'teal'
-                            : connection.status === 'syncing'
-                              ? 'orange'
-                              : connection.status === 'error'
-                                ? 'red'
-                                : 'gray'
-                        }
+                        color={stats.status === 'connected' ? 'teal' : 'gray'}
                         variant="light"
-                        leftSection={
-                          connection.status === 'connected' ? (
-                            <IconCheck size={12} />
-                          ) : connection.status === 'syncing' ? (
-                            <IconLoader size={12} className={classes.spinning} />
-                          ) : connection.status === 'error' ? (
-                            <IconAlertCircle size={12} />
-                          ) : null
-                        }
+                        leftSection={stats.status === 'connected' ? <IconCheck size={12} /> : null}
                       >
-                        {connection.status}
+                        {stats.status === 'connected' ? 'Active' : 'Inactive'}
                       </Badge>
                     </Flex>
                   </Card>
@@ -492,6 +664,35 @@ export function EhrIntegrationsPage(): JSX.Element {
               );
             })}
           </Grid>
+        </Paper>
+
+        {/* FHIR Resource Support */}
+        <Paper p="md" radius="md" withBorder>
+          <Title order={3} size="h4" mb="md">
+            FHIR Resource Support
+          </Title>
+          <Stack gap="sm">
+            {['Patient', 'Encounter', 'Observation', 'Condition', 'AllergyIntolerance', 'MedicationStatement'].map(
+              (resource) => (
+                <Group key={resource} justify="space-between">
+                  <Text size="sm">{resource}</Text>
+                  <Group gap="xs">
+                    {ehrStats.map((stats) => (
+                      <Tooltip key={stats.system} label={ehrSystemMeta[stats.system].name}>
+                        <Badge
+                          size="xs"
+                          variant={stats.status === 'connected' ? 'filled' : 'light'}
+                          color={stats.status === 'connected' ? 'teal' : 'gray'}
+                        >
+                          {stats.system.charAt(0).toUpperCase()}
+                        </Badge>
+                      </Tooltip>
+                    ))}
+                  </Group>
+                </Group>
+              )
+            )}
+          </Stack>
         </Paper>
       </Stack>
     </Box>

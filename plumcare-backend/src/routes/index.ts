@@ -15,11 +15,11 @@ const router = Router();
 // Connection management routes
 router.use('/connections', connectionsRouter);
 
+// Mock data generation and sync (must come before /sync to avoid /:system catching it)
+router.use('/sync/mock-data', mockDataRouter);
+
 // Sync routes
 router.use('/sync', syncRouter);
-
-// Mock data generation and sync
-router.use('/sync/mock-data', mockDataRouter);
 
 // EHR-specific data routes
 router.use('/', patientsRouter);
