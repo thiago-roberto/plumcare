@@ -3,6 +3,7 @@ import cors from 'cors';
 import { config } from './config/index.js';
 import { router } from './routes/index.js';
 import { errorHandler } from './middleware/error.js';
+import { authenticateMedplum } from './services/medplum.service.js';
 
 const app = express();
 
@@ -22,10 +23,26 @@ app.use('/api', router);
 app.use(errorHandler);
 
 // Start server
-app.listen(config.port, () => {
-  console.log(`PlumCare Backend running on port ${config.port}`);
-  console.log(`Mode: ${config.useMocks ? 'MOCK' : 'LIVE'}`);
-  console.log(`Medplum URL: ${config.medplum.baseUrl}`);
-});
+async function start() {
+  // Authenticate with Medplum
+  if (config.medplum.clientId && config.medplum.clientSecret) {
+    try {
+      await authenticateMedplum();
+      console.log('Medplum authentication successful');
+    } catch (error) {
+      console.error('Failed to authenticate with Medplum:', error);
+    }
+  } else {
+    console.warn('Medplum credentials not configured - sync features will not work');
+  }
+
+  app.listen(config.port, () => {
+    console.log(`PlumCare Backend running on port ${config.port}`);
+    console.log(`Mode: ${config.useMocks ? 'MOCK' : 'LIVE'}`);
+    console.log(`Medplum URL: ${config.medplum.baseUrl}`);
+  });
+}
+
+start();
 
 export default app;

@@ -80,6 +80,7 @@ export async function upsertEncounter(encounter: Encounter): Promise<Encounter> 
 
 /**
  * Batch upsert multiple resources using FHIR transaction bundle
+ * Uses conditional create/update based on identifier to handle upserts properly
  */
 export async function batchUpsertResources(resources: Resource[]): Promise<Bundle> {
   const client = getMedplumClient();
@@ -87,15 +88,26 @@ export async function batchUpsertResources(resources: Resource[]): Promise<Bundl
   const bundle: Bundle = {
     resourceType: 'Bundle',
     type: 'transaction',
-    entry: resources.map(resource => ({
-      resource,
-      request: {
-        method: resource.id ? 'PUT' : 'POST',
-        url: resource.id
-          ? `${resource.resourceType}/${resource.id}`
-          : resource.resourceType,
-      },
-    })),
+    entry: resources.map(resource => {
+      // Use conditional upsert based on identifier instead of explicit ID
+      const identifier = (resource as { identifier?: Array<{ system?: string; value?: string }> }).identifier?.[0];
+      const ifNoneExist = identifier
+        ? `identifier=${identifier.system}|${identifier.value}`
+        : undefined;
+
+      // Remove the ID for new resources - let Medplum generate it
+      const resourceWithoutId = { ...resource };
+      delete resourceWithoutId.id;
+
+      return {
+        resource: resourceWithoutId,
+        request: {
+          method: 'POST' as const,
+          url: resource.resourceType,
+          ifNoneExist, // Conditional create - won't create if identifier exists
+        },
+      };
+    }),
   };
 
   return client.executeBatch(bundle);
