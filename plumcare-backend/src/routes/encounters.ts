@@ -1,45 +1,52 @@
 import { Router } from 'express';
 import type { EhrSystem } from '../types/index.js';
-import { getProvider } from '../providers/base.provider.js';
-import { transformToFhirEncounter } from '../services/transform.service.js';
-import { config } from '../config/index.js';
+import { getMedplumClient } from '../services/medplum.service.js';
 import { AppError } from '../middleware/error.js';
+import type { Encounter } from '@medplum/fhirtypes';
 
 const router = Router();
 
+const EHR_SOURCE_SYSTEM = 'http://plumcare.io/ehr-source';
+
 /**
  * GET /api/:system/encounters
- * List encounters from a specific EHR system
+ * List encounters from Medplum filtered by EHR source
  */
 router.get('/:system/encounters', async (req, res, next) => {
   try {
     const system = req.params.system as EhrSystem;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = parseInt(req.query.offset as string) || 0;
-    const format = req.query.format as string || 'fhir'; // 'fhir' or 'native'
 
     if (!isValidSystem(system)) {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const result = await provider.getEncounters({ limit, offset });
+    // Query Medplum for encounters tagged with this EHR source
+    const encounters = await client.searchResources('Encounter', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      _count: limit.toString(),
+      _offset: offset.toString(),
+      _sort: '-_lastUpdated',
+    }) as Encounter[];
 
-    // Transform to FHIR format if requested
-    const data = format === 'native'
-      ? result.data
-      : result.data.map(transformToFhirEncounter);
+    // Get total count
+    const bundle = await client.search('Encounter', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      _summary: 'count',
+    });
+    const total = bundle.total || encounters.length;
 
     res.json({
-      data,
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-      hasMore: result.hasMore,
+      data: encounters,
+      total,
+      limit,
+      offset,
+      hasMore: offset + encounters.length < total,
       system,
-      format,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -48,33 +55,50 @@ router.get('/:system/encounters', async (req, res, next) => {
 
 /**
  * GET /api/:system/encounters/:id
- * Get a specific encounter from an EHR system
+ * Get a specific encounter from Medplum
  */
 router.get('/:system/encounters/:id', async (req, res, next) => {
   try {
     const system = req.params.system as EhrSystem;
     const id = req.params.id;
-    const format = req.query.format as string || 'fhir';
 
     if (!isValidSystem(system)) {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const encounter = await provider.getEncounter(id);
+    let encounter: Encounter | undefined;
+
+    // Try to get by ID first
+    try {
+      encounter = await client.readResource('Encounter', id);
+    } catch {
+      // If not found by ID, search by identifier
+      const encounters = await client.searchResources('Encounter', {
+        _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+        identifier: id,
+      }) as Encounter[];
+      encounter = encounters[0];
+    }
 
     if (!encounter) {
       throw new AppError(404, `Encounter not found: ${id}`, 'NOT_FOUND');
     }
 
-    const data = format === 'native' ? encounter : transformToFhirEncounter(encounter);
+    // Verify the encounter belongs to the requested EHR system
+    const hasCorrectTag = encounter.meta?.tag?.some(
+      t => t.system === EHR_SOURCE_SYSTEM && t.code === system
+    );
+
+    if (!hasCorrectTag) {
+      throw new AppError(404, `Encounter not found in ${system}: ${id}`, 'NOT_FOUND');
+    }
 
     res.json({
-      data,
+      data: encounter,
       system,
-      format,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -83,7 +107,7 @@ router.get('/:system/encounters/:id', async (req, res, next) => {
 
 /**
  * GET /api/:system/patients/:patientId/encounters
- * Get encounters for a specific patient
+ * Get encounters for a specific patient from Medplum
  */
 router.get('/:system/patients/:patientId/encounters', async (req, res, next) => {
   try {
@@ -91,30 +115,37 @@ router.get('/:system/patients/:patientId/encounters', async (req, res, next) => 
     const patientId = req.params.patientId;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = parseInt(req.query.offset as string) || 0;
-    const format = req.query.format as string || 'fhir';
 
     if (!isValidSystem(system)) {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const result = await provider.getEncountersByPatient(patientId, { limit, offset });
+    const encounters = await client.searchResources('Encounter', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _count: limit.toString(),
+      _offset: offset.toString(),
+      _sort: '-_lastUpdated',
+    }) as Encounter[];
 
-    const data = format === 'native'
-      ? result.data
-      : result.data.map(transformToFhirEncounter);
+    const bundle = await client.search('Encounter', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _summary: 'count',
+    });
+    const total = bundle.total || encounters.length;
 
     res.json({
-      data,
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-      hasMore: result.hasMore,
+      data: encounters,
+      total,
+      limit,
+      offset,
+      hasMore: offset + encounters.length < total,
       system,
       patientId,
-      format,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -123,7 +154,7 @@ router.get('/:system/patients/:patientId/encounters', async (req, res, next) => 
 
 // Helper function
 function isValidSystem(system: string): system is EhrSystem {
-  return ['athena', 'elation', 'nextgen'].includes(system);
+  return ['athena', 'elation', 'nextgen', 'medplum'].includes(system);
 }
 
 export { router as encountersRouter };

@@ -5,8 +5,6 @@ import type {
   EhrEncounter,
   PaginationParams,
   PaginatedResponse,
-  Patient,
-  Encounter,
   Observation,
   Condition,
   DiagnosticReport,

@@ -1,45 +1,52 @@
 import { Router } from 'express';
 import type { EhrSystem } from '../types/index.js';
-import { getProvider } from '../providers/base.provider.js';
-import { transformToFhirPatient } from '../services/transform.service.js';
-import { config } from '../config/index.js';
+import { getMedplumClient } from '../services/medplum.service.js';
 import { AppError } from '../middleware/error.js';
+import type { Patient, Observation, Condition, DiagnosticReport } from '@medplum/fhirtypes';
 
 const router = Router();
 
+const EHR_SOURCE_SYSTEM = 'http://plumcare.io/ehr-source';
+
 /**
  * GET /api/:system/patients
- * List patients from a specific EHR system
+ * List patients from Medplum filtered by EHR source
  */
 router.get('/:system/patients', async (req, res, next) => {
   try {
     const system = req.params.system as EhrSystem;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = parseInt(req.query.offset as string) || 0;
-    const format = req.query.format as string || 'fhir'; // 'fhir' or 'native'
 
     if (!isValidSystem(system)) {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const result = await provider.getPatients({ limit, offset });
+    // Query Medplum for patients tagged with this EHR source
+    const patients = await client.searchResources('Patient', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      _count: limit.toString(),
+      _offset: offset.toString(),
+      _sort: '-_lastUpdated',
+    });
 
-    // Transform to FHIR format if requested
-    const data = format === 'native'
-      ? result.data
-      : result.data.map(transformToFhirPatient);
+    // Get total count
+    const bundle = await client.search('Patient', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      _summary: 'count',
+    });
+    const total = bundle.total || patients.length;
 
     res.json({
-      data,
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-      hasMore: result.hasMore,
+      data: patients,
+      total,
+      limit,
+      offset,
+      hasMore: offset + patients.length < total,
       system,
-      format,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -48,33 +55,50 @@ router.get('/:system/patients', async (req, res, next) => {
 
 /**
  * GET /api/:system/patients/:id
- * Get a specific patient from an EHR system
+ * Get a specific patient from Medplum
  */
 router.get('/:system/patients/:id', async (req, res, next) => {
   try {
     const system = req.params.system as EhrSystem;
     const id = req.params.id;
-    const format = req.query.format as string || 'fhir';
 
     if (!isValidSystem(system)) {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const patient = await provider.getPatient(id);
+    let patient: Patient | undefined;
+
+    // Try to get by ID first
+    try {
+      patient = await client.readResource('Patient', id);
+    } catch {
+      // If not found by ID, search by identifier
+      const patients = await client.searchResources('Patient', {
+        _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+        identifier: id,
+      });
+      patient = patients[0];
+    }
 
     if (!patient) {
       throw new AppError(404, `Patient not found: ${id}`, 'NOT_FOUND');
     }
 
-    const data = format === 'native' ? patient : transformToFhirPatient(patient);
+    // Verify the patient belongs to the requested EHR system
+    const hasCorrectTag = patient.meta?.tag?.some(
+      t => t.system === EHR_SOURCE_SYSTEM && t.code === system
+    );
+
+    if (!hasCorrectTag) {
+      throw new AppError(404, `Patient not found in ${system}: ${id}`, 'NOT_FOUND');
+    }
 
     res.json({
-      data,
+      data: patient,
       system,
-      format,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -83,7 +107,7 @@ router.get('/:system/patients/:id', async (req, res, next) => {
 
 /**
  * GET /api/:system/patients/:id/observations
- * Get observations for a patient
+ * Get observations for a patient from Medplum
  */
 router.get('/:system/patients/:id/observations', async (req, res, next) => {
   try {
@@ -96,19 +120,32 @@ router.get('/:system/patients/:id/observations', async (req, res, next) => {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const result = await provider.getObservations(patientId, { limit, offset });
+    const observations = await client.searchResources('Observation', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _count: limit.toString(),
+      _offset: offset.toString(),
+      _sort: '-_lastUpdated',
+    }) as Observation[];
+
+    const bundle = await client.search('Observation', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _summary: 'count',
+    });
+    const total = bundle.total || observations.length;
 
     res.json({
-      data: result.data,
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-      hasMore: result.hasMore,
+      data: observations,
+      total,
+      limit,
+      offset,
+      hasMore: offset + observations.length < total,
       system,
       patientId,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -117,7 +154,7 @@ router.get('/:system/patients/:id/observations', async (req, res, next) => {
 
 /**
  * GET /api/:system/patients/:id/conditions
- * Get conditions for a patient
+ * Get conditions for a patient from Medplum
  */
 router.get('/:system/patients/:id/conditions', async (req, res, next) => {
   try {
@@ -130,19 +167,32 @@ router.get('/:system/patients/:id/conditions', async (req, res, next) => {
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const result = await provider.getConditions(patientId, { limit, offset });
+    const conditions = await client.searchResources('Condition', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _count: limit.toString(),
+      _offset: offset.toString(),
+      _sort: '-_lastUpdated',
+    }) as Condition[];
+
+    const bundle = await client.search('Condition', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _summary: 'count',
+    });
+    const total = bundle.total || conditions.length;
 
     res.json({
-      data: result.data,
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-      hasMore: result.hasMore,
+      data: conditions,
+      total,
+      limit,
+      offset,
+      hasMore: offset + conditions.length < total,
       system,
       patientId,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -151,7 +201,7 @@ router.get('/:system/patients/:id/conditions', async (req, res, next) => {
 
 /**
  * GET /api/:system/patients/:id/diagnostic-reports
- * Get diagnostic reports for a patient
+ * Get diagnostic reports for a patient from Medplum
  */
 router.get('/:system/patients/:id/diagnostic-reports', async (req, res, next) => {
   try {
@@ -164,19 +214,32 @@ router.get('/:system/patients/:id/diagnostic-reports', async (req, res, next) =>
       throw new AppError(400, `Invalid EHR system: ${system}`, 'INVALID_SYSTEM');
     }
 
-    const providerConfig = config[system] as { baseUrl: string; clientId: string; clientSecret: string };
-    const provider = getProvider(system, providerConfig);
+    const client = getMedplumClient();
 
-    const result = await provider.getDiagnosticReports(patientId, { limit, offset });
+    const reports = await client.searchResources('DiagnosticReport', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _count: limit.toString(),
+      _offset: offset.toString(),
+      _sort: '-_lastUpdated',
+    }) as DiagnosticReport[];
+
+    const bundle = await client.search('DiagnosticReport', {
+      _tag: `${EHR_SOURCE_SYSTEM}|${system}`,
+      subject: `Patient/${patientId}`,
+      _summary: 'count',
+    });
+    const total = bundle.total || reports.length;
 
     res.json({
-      data: result.data,
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-      hasMore: result.hasMore,
+      data: reports,
+      total,
+      limit,
+      offset,
+      hasMore: offset + reports.length < total,
       system,
       patientId,
+      source: 'medplum',
     });
   } catch (error) {
     next(error);
@@ -185,7 +248,7 @@ router.get('/:system/patients/:id/diagnostic-reports', async (req, res, next) =>
 
 // Helper function
 function isValidSystem(system: string): system is EhrSystem {
-  return ['athena', 'elation', 'nextgen'].includes(system);
+  return ['athena', 'elation', 'nextgen', 'medplum'].includes(system);
 }
 
 export { router as patientsRouter };

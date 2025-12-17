@@ -142,6 +142,209 @@ curl -X POST http://localhost:8000/api/sync/nextgen
 | `npm run dev` | Start backend in development mode |
 | `npm run build` | Build for production |
 
+## Mock Data Generators & FHIR Transforms
+
+PlumCare includes generators for creating realistic mock EHR data and transforms to convert that data to FHIR R4 format.
+
+### Mock Data Generators
+
+Located in `plumcare-backend/src/generators/`:
+
+#### HL7v2 Message Generator
+```typescript
+import { generateADT_A01, generateORU_R01, generateHL7v2Messages } from './generators';
+
+// Generate a single ADT A01 (Patient Admit) message
+const admitMessage = generateADT_A01();
+
+// Generate a single ORU R01 (Lab Result) message
+const labMessage = generateORU_R01();
+
+// Generate multiple HL7v2 messages
+const messages = generateHL7v2Messages(10);
+```
+
+#### C-CDA Document Generator
+```typescript
+import { generateCCD, generateDischargeSummary, generateCCDADocuments } from './generators';
+
+// Generate a Continuity of Care Document
+const ccd = generateCCD();
+
+// Generate a Discharge Summary
+const discharge = generateDischargeSummary();
+
+// Generate multiple C-CDA documents
+const documents = generateCCDADocuments(5);
+```
+
+#### Athena Health Generator
+```typescript
+import {
+  generateAthenaPatient,
+  generateAthenaEncounter,
+  generateAthenaVitals,
+  generateAthenaLabResult,
+  generateCompleteAthenaPatient,
+  generateAthenaPatients,
+} from './generators';
+
+// Generate a single Athena patient
+const patient = generateAthenaPatient();
+
+// Generate complete patient data (with encounters, vitals, labs, problems, allergies, meds)
+const completePatient = generateCompleteAthenaPatient();
+// Returns: { patient, appointments, encounters, problems, allergies, medications, vitals, labResults }
+
+// Generate multiple patients
+const patients = generateAthenaPatients(10);
+```
+
+#### Elation Health Generator
+```typescript
+import {
+  generateElationPatient,
+  generateElationVisitNote,
+  generateCompleteElationPatient,
+  generateElationPatients,
+} from './generators';
+
+// Generate a single Elation patient
+const patient = generateElationPatient();
+
+// Generate complete patient data
+const completePatient = generateCompleteElationPatient();
+// Returns: { patient, appointments, visitNotes, problems, allergies, medications, labOrders }
+
+// Generate multiple patients
+const patients = generateElationPatients(10);
+```
+
+#### NextGen Healthcare Generator
+```typescript
+import {
+  generateNextGenPatient,
+  generateNextGenEncounter,
+  generateCompleteNextGenPatient,
+  generateNextGenPatients,
+} from './generators';
+
+// Generate a single NextGen patient
+const patient = generateNextGenPatient();
+
+// Generate complete patient data
+const completePatient = generateCompleteNextGenPatient();
+// Returns: { patient, appointments, encounters, problems, allergies, medications, labOrders }
+
+// Generate multiple patients
+const patients = generateNextGenPatients(10);
+```
+
+### FHIR R4 Transforms
+
+Located in `plumcare-backend/src/transforms/`:
+
+#### HL7v2 to FHIR
+```typescript
+import { parseHL7v2ToFhir, parseHL7v2ToPatient, parseHL7v2ToEncounter } from './transforms';
+
+// Parse HL7v2 message to FHIR Bundle
+const bundle = parseHL7v2ToFhir(hl7v2Message);
+
+// Parse to individual resources
+const patient = parseHL7v2ToPatient(hl7v2Message);
+const encounter = parseHL7v2ToEncounter(hl7v2Message);
+```
+
+#### C-CDA to FHIR
+```typescript
+import { parseCcdaToFhir, parseCcdaToPatient, parseCcdaToConditions } from './transforms';
+
+// Parse C-CDA document to FHIR Bundle
+const bundle = parseCcdaToFhir(ccdaDocument);
+
+// Parse to individual resources
+const patient = parseCcdaToPatient(ccdaDocument);
+const conditions = parseCcdaToConditions(ccdaDocument);
+```
+
+#### Athena to FHIR
+```typescript
+import { parseAthenaJsonToFhir, parseAthenaPatientToFhir } from './transforms';
+
+// Transform complete Athena patient data to FHIR Bundle
+const bundle = parseAthenaJsonToFhir({
+  patient: athenaPatient,
+  encounters: athenaEncounters,
+  problems: athenaProblems,
+  allergies: athenaAllergies,
+  medications: athenaMedications,
+  vitals: athenaVitals,
+  labResults: athenaLabResults,
+});
+
+// Transform individual patient
+const fhirPatient = parseAthenaPatientToFhir(athenaPatient);
+```
+
+#### Elation to FHIR
+```typescript
+import { parseElationJsonToFhir, parseElationPatientToFhir } from './transforms';
+
+// Transform complete Elation patient data to FHIR Bundle
+const bundle = parseElationJsonToFhir({
+  patient: elationPatient,
+  visitNotes: elationVisitNotes,
+  problems: elationProblems,
+  allergies: elationAllergies,
+  medications: elationMedications,
+  labOrders: elationLabOrders,
+});
+
+// Transform individual patient
+const fhirPatient = parseElationPatientToFhir(elationPatient);
+```
+
+#### NextGen to FHIR
+```typescript
+import { parseNextgenJsonToFhir, parseNextGenPatientToFhir } from './transforms';
+
+// Transform complete NextGen patient data to FHIR Bundle
+const bundle = parseNextgenJsonToFhir({
+  patient: nextgenPatient,
+  encounters: nextgenEncounters,
+  problems: nextgenProblems,
+  allergies: nextgenAllergies,
+  medications: nextgenMedications,
+  labOrders: nextgenLabOrders,
+});
+
+// Transform individual patient
+const fhirPatient = parseNextGenPatientToFhir(nextgenPatient);
+```
+
+### Sync Mock Data API
+
+Generate and sync mock patient data to Medplum:
+
+```bash
+# Generate 5 patients per EHR and sync to Medplum
+curl -X POST http://localhost:8000/api/sync/mock-data \
+  -H "Content-Type: application/json" \
+  -d '{"patientCount": 5, "includeAllData": true}'
+
+# Response:
+{
+  "success": true,
+  "summary": {
+    "athena": { "patients": 5, "encounters": 12, "observations": 45, ... },
+    "elation": { "patients": 5, "encounters": 10, "observations": 38, ... },
+    "nextgen": { "patients": 5, "encounters": 11, "observations": 42, ... }
+  },
+  "totalResources": 250
+}
+```
+
 ## Project Structure
 
 ```
@@ -186,6 +389,7 @@ plumcare/
 | `/api/encounters/:system` | GET | Get encounters from EHR system |
 | `/api/sync/:system` | POST | Trigger sync for EHR system |
 | `/api/sync/all` | POST | Trigger sync for all EHR systems |
+| `/api/sync/mock-data` | POST | Generate mock data and sync to Medplum |
 | `/api/sync/events` | GET | Get recent sync events |
 
 ### Medplum Server (localhost:3000)

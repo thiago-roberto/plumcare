@@ -14,42 +14,102 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core';
+import type { Patient, Encounter } from '@medplum/fhirtypes';
+import { useMedplum } from '@medplum/react';
 import {
   IconActivity,
   IconArrowRight,
   IconCheck,
-  IconCloud,
   IconDatabase,
   IconPlugConnected,
   IconRefresh,
   IconUsers,
 } from '@tabler/icons-react';
 import type { JSX } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { getEhrConnections, ehrSystemMeta, type EhrConnection } from '../../services/ehrApi';
+import { ehrSystemMeta, type EhrSystem } from '../../services/ehrApi';
 import classes from './HomePage.module.css';
+
+const EHR_SOURCE_SYSTEM = 'http://plumcare.io/ehr-source';
+const EHR_SYSTEMS: EhrSystem[] = ['athena', 'elation', 'nextgen'];
+
+interface EhrStats {
+  system: EhrSystem;
+  patientCount: number;
+  encounterCount: number;
+  status: 'connected' | 'syncing' | 'disconnected';
+  lastSync: string;
+}
+
+// Get EHR source from resource tags
+function getEhrSource(resource: Patient | Encounter): EhrSystem | null {
+  const tag = resource.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
+  if (tag?.code && EHR_SYSTEMS.includes(tag.code as EhrSystem)) {
+    return tag.code as EhrSystem;
+  }
+  return null;
+}
 
 export function HomePage(): JSX.Element {
   const navigate = useNavigate();
-  const [connections, setConnections] = useState<EhrConnection[]>([]);
+  const medplum = useMedplum();
+  const [ehrStats, setEhrStats] = useState<EhrStats[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getEhrConnections()
-      .then(setConnections)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+  const fetchStats = useCallback(async () => {
+    try {
+      setLoading(true);
 
-  // Calculate stats from connections
-  const stats = {
-    connectedSystems: connections.filter(c => c.status === 'connected' || c.status === 'syncing').length,
-    totalSystems: connections.length || 3,
-    totalPatients: connections.reduce((sum, c) => sum + c.patientCount, 0),
-    totalEncounters: connections.reduce((sum, c) => sum + c.encounterCount, 0),
-    totalPending: connections.reduce((sum, c) => sum + c.pendingRecords, 0),
-  };
+      // Fetch all patients and encounters from Medplum
+      const [patients, encounters] = await Promise.all([
+        medplum.searchResources('Patient', { _count: '500' }),
+        medplum.searchResources('Encounter', { _count: '500' }),
+      ]);
+
+      // Count by EHR source
+      const patientCounts: Record<EhrSystem, number> = { athena: 0, elation: 0, nextgen: 0, medplum: 0 };
+      const encounterCounts: Record<EhrSystem, number> = { athena: 0, elation: 0, nextgen: 0, medplum: 0 };
+
+      patients.forEach(p => {
+        const source = getEhrSource(p);
+        if (source) {
+          patientCounts[source]++;
+        }
+      });
+
+      encounters.forEach(e => {
+        const source = getEhrSource(e);
+        if (source) {
+          encounterCounts[source]++;
+        }
+      });
+
+      // Build stats for each EHR system
+      const stats: EhrStats[] = EHR_SYSTEMS.map(system => ({
+        system,
+        patientCount: patientCounts[system],
+        encounterCount: encounterCounts[system],
+        status: patientCounts[system] > 0 ? 'connected' : 'disconnected',
+        lastSync: new Date().toISOString(),
+      }));
+
+      setEhrStats(stats);
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [medplum]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  // Calculate totals
+  const totalPatients = ehrStats.reduce((sum, s) => sum + s.patientCount, 0);
+  const totalEncounters = ehrStats.reduce((sum, s) => sum + s.encounterCount, 0);
+  const connectedSystems = ehrStats.filter(s => s.status === 'connected').length;
 
   if (loading) {
     return (
@@ -104,10 +164,10 @@ export function HomePage(): JSX.Element {
                     size={120}
                     thickness={8}
                     roundCaps
-                    sections={[{ value: (stats.connectedSystems / stats.totalSystems) * 100, color: '#0d9488' }]}
+                    sections={[{ value: (connectedSystems / 3) * 100, color: '#0d9488' }]}
                     label={
                       <Text ta="center" fw={700} size="xl">
-                        {stats.connectedSystems}/{stats.totalSystems}
+                        {connectedSystems}/3
                       </Text>
                     }
                   />
@@ -118,10 +178,10 @@ export function HomePage(): JSX.Element {
                     size={120}
                     thickness={8}
                     roundCaps
-                    sections={[{ value: 100, color: '#ff5500' }]}
+                    sections={[{ value: totalPatients > 0 ? 100 : 0, color: '#ff5500' }]}
                     label={
                       <Text ta="center" fw={700} size="xl">
-                        {(stats.totalPatients / 1000).toFixed(1)}k
+                        {totalPatients}
                       </Text>
                     }
                   />
@@ -142,7 +202,7 @@ export function HomePage(): JSX.Element {
                 Connected EHRs
               </Text>
               <Text fw={700} size="2rem" className={classes.statValue}>
-                {stats.connectedSystems}
+                {connectedSystems}
               </Text>
             </div>
             <ThemeIcon size={48} radius="md" className={classes.statIconGreen}>
@@ -158,7 +218,7 @@ export function HomePage(): JSX.Element {
                 Total Patients
               </Text>
               <Text fw={700} size="2rem" className={classes.statValue}>
-                {stats.totalPatients.toLocaleString()}
+                {totalPatients.toLocaleString()}
               </Text>
             </div>
             <ThemeIcon size={48} radius="md" className={classes.statIconBlue}>
@@ -174,7 +234,7 @@ export function HomePage(): JSX.Element {
                 Total Encounters
               </Text>
               <Text fw={700} size="2rem" className={classes.statValue}>
-                {stats.totalEncounters.toLocaleString()}
+                {totalEncounters.toLocaleString()}
               </Text>
             </div>
             <ThemeIcon size={48} radius="md" className={classes.statIconPurple}>
@@ -189,8 +249,8 @@ export function HomePage(): JSX.Element {
               <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
                 Sync Status
               </Text>
-              <Text fw={700} size="2rem" className={classes.statValueGreen}>
-                Active
+              <Text fw={700} size="2rem" className={connectedSystems > 0 ? classes.statValueGreen : classes.statValue}>
+                {connectedSystems > 0 ? 'Active' : 'Idle'}
               </Text>
             </div>
             <ThemeIcon size={48} radius="md" className={classes.statIconOrange}>
@@ -210,17 +270,18 @@ export function HomePage(): JSX.Element {
             variant="subtle"
             rightSection={<IconRefresh size={16} />}
             className={classes.refreshButton}
+            onClick={fetchStats}
           >
             Refresh
           </Button>
         </Group>
 
         <SimpleGrid cols={{ base: 1, md: 3 }}>
-          {connections.map((connection) => {
-            const meta = ehrSystemMeta[connection.system];
+          {ehrStats.map((stats) => {
+            const meta = ehrSystemMeta[stats.system];
             return (
               <Card
-                key={connection.id}
+                key={stats.system}
                 className={classes.ehrCard}
                 padding="lg"
                 radius="md"
@@ -230,14 +291,14 @@ export function HomePage(): JSX.Element {
                   <Group gap="sm">
                     <Box
                       className={classes.ehrDot}
-                      style={{ backgroundColor: connection.status === 'connected' ? '#0d9488' : connection.status === 'syncing' ? '#ff5500' : '#ef4444' }}
+                      style={{ backgroundColor: stats.status === 'connected' ? '#0d9488' : stats.status === 'syncing' ? '#ff5500' : '#94a3b8' }}
                     />
                     <Text fw={600}>{meta.name}</Text>
                   </Group>
                   <ThemeIcon
                     size={24}
                     radius="xl"
-                    color={connection.status === 'connected' ? 'teal' : connection.status === 'syncing' ? 'orange' : 'red'}
+                    color={stats.status === 'connected' ? 'teal' : stats.status === 'syncing' ? 'orange' : 'gray'}
                     variant="light"
                   >
                     <IconCheck size={14} />
@@ -247,22 +308,16 @@ export function HomePage(): JSX.Element {
                 <Group gap="xl">
                   <div>
                     <Text size="xs" c="dimmed">Patients</Text>
-                    <Text fw={600}>{connection.patientCount.toLocaleString()}</Text>
+                    <Text fw={600}>{stats.patientCount.toLocaleString()}</Text>
                   </div>
                   <div>
                     <Text size="xs" c="dimmed">Encounters</Text>
-                    <Text fw={600}>{connection.encounterCount.toLocaleString()}</Text>
-                  </div>
-                  <div>
-                    <Text size="xs" c="dimmed">Pending</Text>
-                    <Text fw={600} c={connection.pendingRecords > 0 ? 'orange' : 'teal'}>
-                      {connection.pendingRecords}
-                    </Text>
+                    <Text fw={600}>{stats.encounterCount.toLocaleString()}</Text>
                   </div>
                 </Group>
 
                 <Text size="xs" c="dimmed" mt="md">
-                  Last sync: {new Date(connection.lastSync).toLocaleTimeString()}
+                  {stats.patientCount > 0 ? `${stats.patientCount} patients synced` : 'No data synced yet'}
                 </Text>
               </Card>
             );

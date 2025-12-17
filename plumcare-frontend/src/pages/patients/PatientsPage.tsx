@@ -28,55 +28,58 @@ import {
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getPatientsByEhr, type EhrSystem, ehrSystemMeta } from '../../services/ehrApi';
+import { type EhrSystem, ehrSystemMeta } from '../../services/ehrApi';
 import classes from './PatientsPage.module.css';
 
 type PatientWithSource = Patient & { source: EhrSystem };
+
+const EHR_SOURCE_SYSTEM = 'http://plumcare.io/ehr-source';
+
+// Get EHR source from patient tags
+function getEhrSource(patient: Patient): EhrSystem {
+  const tag = patient.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
+  if (tag?.code && ['athena', 'elation', 'nextgen'].includes(tag.code)) {
+    return tag.code as EhrSystem;
+  }
+  return 'medplum'; // Default for patients without EHR source tag
+}
 
 export function PatientsPage(): JSX.Element {
   const medplum = useMedplum();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
-  const [ehrPatients, setEhrPatients] = useState<PatientWithSource[]>([]);
-  const [medplumPatients, setMedplumPatients] = useState<PatientWithSource[]>([]);
+  const [patients, setPatients] = useState<PatientWithSource[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch patients from all EHR systems and Medplum
+  // Fetch all patients from Medplum once
   useEffect(() => {
-    const fetchAllPatients = async () => {
+    const fetchPatients = async () => {
       try {
-        // Fetch from EHR backend API in parallel
-        const [athenaRes, elationRes, nextgenRes] = await Promise.all([
-          getPatientsByEhr('athena', { limit: 100 }),
-          getPatientsByEhr('elation', { limit: 100 }),
-          getPatientsByEhr('nextgen', { limit: 100 }),
-        ]);
+        setLoading(true);
+        // Fetch all patients from Medplum
+        const allPatients = await medplum.searchResources('Patient', {
+          _count: '200',
+          _sort: '-_lastUpdated',
+        });
 
-        const ehrPatientsWithSource: PatientWithSource[] = [
-          ...athenaRes.data.map(p => ({ ...p, source: 'athena' as EhrSystem })),
-          ...elationRes.data.map(p => ({ ...p, source: 'elation' as EhrSystem })),
-          ...nextgenRes.data.map(p => ({ ...p, source: 'nextgen' as EhrSystem })),
-        ];
-        setEhrPatients(ehrPatientsWithSource);
+        // Add source based on tags
+        const patientsWithSource = allPatients.map(p => ({
+          ...p,
+          source: getEhrSource(p),
+        }));
 
-        // Also fetch from Medplum
-        const patients = await medplum.searchResources('Patient', { _count: '100' });
-        const patientsWithSource = patients.map(p => ({ ...p, source: 'medplum' as EhrSystem }));
-        setMedplumPatients(patientsWithSource);
+        setPatients(patientsWithSource);
       } catch (error) {
         console.error('Error fetching patients:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchAllPatients();
+    fetchPatients();
   }, [medplum]);
 
-  // Combine EHR patients with Medplum patients
-  const allPatients: PatientWithSource[] = [...ehrPatients, ...medplumPatients];
-
-  const filteredPatients = allPatients.filter(patient => {
+  const filteredPatients = patients.filter(patient => {
     const name = patient.name?.[0];
     const fullName = `${name?.given?.join(' ')} ${name?.family}`.toLowerCase();
     const matchesSearch = !searchQuery || fullName.includes(searchQuery.toLowerCase());
@@ -84,14 +87,14 @@ export function PatientsPage(): JSX.Element {
     return matchesSearch && matchesSource;
   });
 
-  const getPatientInitials = (patient: typeof allPatients[0]) => {
+  const getPatientInitials = (patient: typeof patients[0]) => {
     const name = patient.name?.[0];
     const first = name?.given?.[0]?.[0] || '';
     const last = name?.family?.[0] || '';
     return `${first}${last}`.toUpperCase();
   };
 
-  const getPatientName = (patient: typeof allPatients[0]) => {
+  const getPatientName = (patient: typeof patients[0]) => {
     const name = patient.name?.[0];
     return `${name?.given?.join(' ')} ${name?.family}`;
   };
@@ -150,7 +153,6 @@ export function PatientsPage(): JSX.Element {
                 { value: 'athena', label: 'Athena Health' },
                 { value: 'elation', label: 'Elation Health' },
                 { value: 'nextgen', label: 'NextGen Healthcare' },
-                { value: 'medplum', label: 'Medplum' },
               ]}
               value={sourceFilter}
               onChange={setSourceFilter}
@@ -161,9 +163,9 @@ export function PatientsPage(): JSX.Element {
         </Paper>
 
         {/* Stats Cards */}
-        <SimpleGrid cols={{ base: 1, sm: 4 }}>
-          {(['athena', 'elation', 'nextgen', 'medplum'] as EhrSystem[]).map((system) => {
-            const count = allPatients.filter(p => p.source === system).length;
+        <SimpleGrid cols={{ base: 1, sm: 3 }}>
+          {(['athena', 'elation', 'nextgen'] as EhrSystem[]).map((system) => {
+            const count = patients.filter(p => p.source === system).length;
             const meta = ehrSystemMeta[system];
             return (
               <Paper

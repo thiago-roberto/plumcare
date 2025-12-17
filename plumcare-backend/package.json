@@ -10,10 +10,13 @@
     "start": "node dist/index.js",
     "test": "vitest",
     "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
     "setup:medplum": "tsx scripts/setup-medplum-client.ts"
   },
   "dependencies": {
+    "@faker-js/faker": "^10.1.0",
     "@medplum/core": "^5.0.10",
+    "@medplum/fhirtypes": "^5.0.10",
     "axios": "^1.7.9",
     "cors": "^2.8.5",
     "express": "^4.21.2",
@@ -21,10 +24,15 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
     "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.50.0",
+    "@typescript-eslint/parser": "^8.50.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-unused-imports": "^4.3.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

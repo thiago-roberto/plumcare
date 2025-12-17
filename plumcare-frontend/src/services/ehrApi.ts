@@ -220,6 +220,49 @@ export async function getAggregateStats(): Promise<{
   };
 }
 
+/**
+ * Sync mock data - generate and sync mock patient data for all EHRs
+ */
+export interface MockDataSyncRequest {
+  patientCount?: number;
+  includeAllData?: boolean;
+}
+
+export interface EhrResourceSummary {
+  patients: number;
+  encounters: number;
+  observations: number;
+  conditions: number;
+  allergies: number;
+  medications: number;
+  diagnosticReports: number;
+}
+
+export interface MockDataSyncResponse {
+  success: boolean;
+  summary: {
+    athena: EhrResourceSummary;
+    elation: EhrResourceSummary;
+    nextgen: EhrResourceSummary;
+  };
+  totalResources: number;
+  errors?: string[];
+}
+
+export async function syncMockData(options?: MockDataSyncRequest): Promise<MockDataSyncResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/sync/mock-data`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(options || {}),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to sync mock data');
+  }
+  return response.json();
+}
+
 // EHR System metadata (static, doesn't need API call)
 export const ehrSystemMeta: Record<EhrSystem, { name: string; color: string; logo: string; description: string }> = {
   athena: {

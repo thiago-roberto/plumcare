@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { connectionsRouter } from './connections.js';
 import { syncRouter } from './sync.js';
+import { mockDataRouter } from './mock-data.js';
 import { patientsRouter } from './patients.js';
 import { encountersRouter } from './encounters.js';
 
@@ -16,6 +17,9 @@ router.use('/connections', connectionsRouter);
 
 // Sync routes
 router.use('/sync', syncRouter);
+
+// Mock data generation and sync
+router.use('/sync/mock-data', mockDataRouter);
 
 // EHR-specific data routes
 router.use('/', patientsRouter);

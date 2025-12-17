@@ -1,16 +1,20 @@
 import {
   Badge,
   Box,
+  Button,
   Card,
   Center,
   Flex,
   Grid,
   Group,
   Loader,
+  Modal,
+  NumberInput,
   Paper,
   Progress,
   RingProgress,
   Stack,
+  Switch,
   Text,
   ThemeIcon,
   Title,
@@ -32,9 +36,11 @@ import { useState, useEffect } from 'react';
 import {
   getEhrConnections,
   getSyncEvents,
+  syncMockData,
   ehrSystemMeta,
   type EhrConnection,
   type SyncEvent,
+  type MockDataSyncResponse,
 } from '../../services/ehrApi';
 import { EhrConnectionCard } from '../../components/ehr/EhrConnectionCard';
 import { SyncActivityFeed } from '../../components/ehr/SyncActivityFeed';
@@ -45,6 +51,13 @@ export function EhrIntegrationsPage(): JSX.Element {
   const [syncEvents, setSyncEvents] = useState<SyncEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Mock data sync state
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [patientCount, setPatientCount] = useState<number>(3);
+  const [includeAllData, setIncludeAllData] = useState(true);
+  const [syncResult, setSyncResult] = useState<MockDataSyncResponse | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -65,6 +78,32 @@ export function EhrIntegrationsPage(): JSX.Element {
     }
     fetchData();
   }, []);
+
+  // Handle mock data sync
+  const handleSyncMockData = async () => {
+    try {
+      setSyncing(true);
+      setSyncResult(null);
+      const result = await syncMockData({ patientCount, includeAllData });
+      setSyncResult(result);
+      // Refresh connections after sync
+      const connectionsData = await getEhrConnections();
+      setConnections(connectionsData);
+    } catch (err) {
+      setSyncResult({
+        success: false,
+        summary: {
+          athena: { patients: 0, encounters: 0, observations: 0, conditions: 0, allergies: 0, medications: 0, diagnosticReports: 0 },
+          elation: { patients: 0, encounters: 0, observations: 0, conditions: 0, allergies: 0, medications: 0, diagnosticReports: 0 },
+          nextgen: { patients: 0, encounters: 0, observations: 0, conditions: 0, allergies: 0, medications: 0, diagnosticReports: 0 },
+        },
+        totalResources: 0,
+        errors: [err instanceof Error ? err.message : 'Failed to sync mock data'],
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Calculate stats from connections
   const stats = {
@@ -95,14 +134,147 @@ export function EhrIntegrationsPage(): JSX.Element {
     <Box p="xl">
       <Stack gap="xl">
         {/* Header */}
-        <Box>
-          <Title order={1} mb="xs" className={classes.pageTitle}>
-            EHR Integrations
-          </Title>
-          <Text c="dimmed" size="sm">
-            Manage FHIR + HL7 integrations with Athena, Elation, and NextGen EHR systems
-          </Text>
-        </Box>
+        <Group justify="space-between" align="flex-start">
+          <Box>
+            <Title order={1} mb="xs" className={classes.pageTitle}>
+              EHR Integrations
+            </Title>
+            <Text c="dimmed" size="sm">
+              Manage FHIR + HL7 integrations with Athena, Elation, and NextGen EHR systems
+            </Text>
+          </Box>
+          <Button
+            leftSection={<IconDatabase size={16} />}
+            variant="light"
+            color="violet"
+            onClick={() => setSyncModalOpen(true)}
+          >
+            Sync Mock Data
+          </Button>
+        </Group>
+
+        {/* Mock Data Sync Modal */}
+        <Modal
+          opened={syncModalOpen}
+          onClose={() => {
+            setSyncModalOpen(false);
+            setSyncResult(null);
+          }}
+          title="Sync Mock Data"
+          size="lg"
+        >
+          <Stack gap="md">
+            {!syncResult ? (
+              <>
+                <Text size="sm" c="dimmed">
+                  Generate random patient data for all 3 EHRs (Athena, Elation, NextGen), transform to FHIR R4, and store in Medplum.
+                </Text>
+
+                <NumberInput
+                  label="Patients per EHR"
+                  description="Number of patients to generate for each EHR system (1-50)"
+                  value={patientCount}
+                  onChange={(val) => setPatientCount(typeof val === 'number' ? val : 3)}
+                  min={1}
+                  max={50}
+                />
+
+                <Switch
+                  label="Include all data"
+                  description="Generate encounters, labs, allergies, medications, conditions, etc."
+                  checked={includeAllData}
+                  onChange={(event) => setIncludeAllData(event.currentTarget.checked)}
+                />
+
+                <Button
+                  fullWidth
+                  loading={syncing}
+                  onClick={handleSyncMockData}
+                  leftSection={<IconCloudUpload size={16} />}
+                >
+                  {syncing ? 'Generating & Syncing...' : 'Generate & Sync'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Paper p="md" withBorder radius="md" bg={syncResult.success ? 'teal.0' : 'red.0'}>
+                  <Group>
+                    {syncResult.success ? (
+                      <ThemeIcon color="teal" size="lg" radius="xl">
+                        <IconCheck size={20} />
+                      </ThemeIcon>
+                    ) : (
+                      <ThemeIcon color="red" size="lg" radius="xl">
+                        <IconAlertCircle size={20} />
+                      </ThemeIcon>
+                    )}
+                    <div>
+                      <Text fw={600}>{syncResult.success ? 'Sync Complete!' : 'Sync Failed'}</Text>
+                      <Text size="sm" c="dimmed">
+                        {syncResult.totalResources} total FHIR resources created
+                      </Text>
+                    </div>
+                  </Group>
+                </Paper>
+
+                {syncResult.errors && syncResult.errors.length > 0 && (
+                  <Paper p="md" withBorder radius="md" bg="red.0">
+                    <Text size="sm" fw={600} c="red" mb="xs">Errors:</Text>
+                    {syncResult.errors.map((err, i) => (
+                      <Text key={i} size="xs" c="red">{err}</Text>
+                    ))}
+                  </Paper>
+                )}
+
+                <Title order={5}>Resources by EHR</Title>
+
+                <Grid>
+                  {(['athena', 'elation', 'nextgen'] as const).map((ehr) => (
+                    <Grid.Col key={ehr} span={4}>
+                      <Paper p="sm" withBorder radius="md">
+                        <Text fw={600} size="sm" tt="capitalize" mb="xs">{ehr}</Text>
+                        <Stack gap={4}>
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Patients</Text>
+                            <Text size="xs" fw={500}>{syncResult.summary[ehr].patients}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Encounters</Text>
+                            <Text size="xs" fw={500}>{syncResult.summary[ehr].encounters}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Observations</Text>
+                            <Text size="xs" fw={500}>{syncResult.summary[ehr].observations}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Conditions</Text>
+                            <Text size="xs" fw={500}>{syncResult.summary[ehr].conditions}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Allergies</Text>
+                            <Text size="xs" fw={500}>{syncResult.summary[ehr].allergies}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Medications</Text>
+                            <Text size="xs" fw={500}>{syncResult.summary[ehr].medications}</Text>
+                          </Group>
+                        </Stack>
+                      </Paper>
+                    </Grid.Col>
+                  ))}
+                </Grid>
+
+                <Button
+                  fullWidth
+                  variant="light"
+                  onClick={() => setSyncResult(null)}
+                >
+                  Sync More Data
+                </Button>
+              </>
+            )}
+          </Stack>
+        </Modal>
 
         {/* Stats Overview */}
         <Grid>
