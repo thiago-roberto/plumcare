@@ -1,11 +1,12 @@
 import { Loading, useMedplum, useMedplumProfile } from '@medplum/react';
 import type { JSX } from 'react';
 import { Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { PlumCareShell } from './components/shell/PlumCareShell';
 import './index.css';
 import { EhrIntegrationsPage } from './pages/ehr-integrations/EhrIntegrationsPage';
 import { HomePage } from './pages/home/HomePage';
+import { LoadingPage } from './pages/LoadingPage';
 import { NewPatientPage } from './pages/patients/NewPatientPage';
 import { PatientsPage } from './pages/patients/PatientsPage';
 import { SignInPage } from './pages/SignInPage';
@@ -13,6 +14,7 @@ import { SignInPage } from './pages/SignInPage';
 export function App(): JSX.Element | null {
   const medplum = useMedplum();
   const profile = useMedplumProfile();
+  const location = useLocation();
 
   if (medplum.isLoading()) {
     return null;
@@ -35,6 +37,17 @@ export function App(): JSX.Element | null {
     );
   }
 
+  // Loading page shown without shell after login
+  if (location.pathname === '/loading') {
+    return (
+      <Suspense fallback={<Loading />}>
+        <Routes>
+          <Route path="/loading" element={<LoadingPage />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
   // Logged in - show PlumCare app
   return (
     <PlumCareShell onSignOut={handleSignOut}>
@@ -45,7 +58,7 @@ export function App(): JSX.Element | null {
           <Route path="/patients" element={<PatientsPage />} />
           <Route path="/patients/:patientId" element={<PatientsPage />} />
           <Route path="/new-patient" element={<NewPatientPage />} />
-          <Route path="/signin" element={<Navigate to="/" replace />} />
+          <Route path="/signin" element={<Navigate to="/loading" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
