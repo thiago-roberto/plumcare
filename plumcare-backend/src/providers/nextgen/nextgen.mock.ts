@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { Observation, Condition, DiagnosticReport } from '@medplum/fhirtypes';
 import {
   BaseEhrProvider,
   type AuthResult,
@@ -11,259 +12,58 @@ import type {
   EhrEncounter,
   PaginationParams,
   PaginatedResponse,
-  Observation,
-  Condition,
-  DiagnosticReport,
 } from '../../types/index.js';
+import {
+  generateCompleteNextGenPatient,
+  type NextGenPatient,
+  type NextGenEncounter,
+  type NextGenProblem,
+  type NextGenAllergy,
+  type NextGenMedication,
+  type NextGenLabOrder,
+} from '../../generators/nextgen.generator.js';
+import {
+  generateCCDADocuments,
+  type CCDADocument,
+} from '../../generators/ccda.generator.js';
+import {
+  generateHL7v2Messages,
+  type HL7v2Message,
+} from '../../generators/hl7v2.generator.js';
 
-// Mock data store
-const mockPatients: EhrPatient[] = [
-  {
-    id: 'nextgen-p-001',
-    mrn: 'NXG-11111',
-    firstName: 'Emily',
-    lastName: 'Thompson',
-    middleName: 'Grace',
-    dateOfBirth: '1988-05-03',
-    gender: 'female',
-    email: 'emily.thompson@email.com',
-    phone: '512-555-0123',
-    address: {
-      street: '500 Congress Avenue',
-      city: 'Austin',
-      state: 'TX',
-      postalCode: '78701',
-      country: 'USA',
-    },
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-p-001',
-    lastUpdated: '2024-12-14T11:00:00Z',
-  },
-  {
-    id: 'nextgen-p-002',
-    mrn: 'NXG-11112',
-    firstName: 'Christopher',
-    lastName: 'Brown',
-    dateOfBirth: '1970-12-20',
-    gender: 'male',
-    phone: '214-555-0456',
-    address: {
-      street: '1500 Main Street',
-      city: 'Dallas',
-      state: 'TX',
-      postalCode: '75201',
-    },
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-p-002',
-    lastUpdated: '2024-12-13T15:30:00Z',
-  },
-  {
-    id: 'nextgen-p-003',
-    mrn: 'NXG-11113',
-    firstName: 'Maria',
-    lastName: 'Garcia',
-    middleName: 'Isabel',
-    dateOfBirth: '1995-08-11',
-    gender: 'female',
-    email: 'maria.garcia@email.com',
-    phone: '713-555-0789',
-    address: {
-      city: 'Houston',
-      state: 'TX',
-      postalCode: '77001',
-    },
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-p-003',
-    lastUpdated: '2024-12-15T09:00:00Z',
-  },
-  {
-    id: 'nextgen-p-004',
-    mrn: 'NXG-11114',
-    firstName: 'William',
-    lastName: 'Taylor',
-    dateOfBirth: '1958-02-28',
-    gender: 'male',
-    phone: '210-555-1234',
-    address: {
-      city: 'San Antonio',
-      state: 'TX',
-      postalCode: '78201',
-    },
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-p-004',
-    lastUpdated: '2024-12-12T14:00:00Z',
-  },
-];
+// Native format data store - this is what NextGen's REST API would actually return
+interface NextGenNativeData {
+  patient: NextGenPatient;
+  encounters: NextGenEncounter[];
+  problems: NextGenProblem[];
+  allergies: NextGenAllergy[];
+  medications: NextGenMedication[];
+  labOrders: NextGenLabOrder[];
+}
 
-const mockEncounters: EhrEncounter[] = [
-  {
-    id: 'nextgen-e-001',
-    patientId: 'nextgen-p-001',
-    type: 'Office Visit',
-    status: 'finished',
-    startTime: '2024-12-14T11:00:00Z',
-    endTime: '2024-12-14T11:30:00Z',
-    provider: { id: 'prov-nxg-001', name: 'Dr. Sarah Mitchell' },
-    facility: { id: 'fac-nxg-001', name: 'Austin Women\'s Health' },
-    reason: 'Prenatal checkup',
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-e-001',
-    lastUpdated: '2024-12-14T11:30:00Z',
-  },
-  {
-    id: 'nextgen-e-002',
-    patientId: 'nextgen-p-002',
-    type: 'Office Visit',
-    status: 'planned',
-    startTime: '2024-12-20T15:00:00Z',
-    provider: { id: 'prov-nxg-002', name: 'Dr. Robert Harris' },
-    facility: { id: 'fac-nxg-002', name: 'Dallas Cardiology Associates' },
-    reason: 'Cardiology consultation',
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-e-002',
-    lastUpdated: '2024-12-15T09:00:00Z',
-  },
-  {
-    id: 'nextgen-e-003',
-    patientId: 'nextgen-p-003',
-    type: 'Urgent Care',
-    status: 'finished',
-    startTime: '2024-12-13T18:00:00Z',
-    endTime: '2024-12-13T18:45:00Z',
-    provider: { id: 'prov-nxg-003', name: 'Dr. Lisa Anderson' },
-    facility: { id: 'fac-nxg-003', name: 'Houston Urgent Care' },
-    reason: 'Acute bronchitis symptoms',
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-e-003',
-    lastUpdated: '2024-12-13T18:45:00Z',
-  },
-  {
-    id: 'nextgen-e-004',
-    patientId: 'nextgen-p-004',
-    type: 'Office Visit',
-    status: 'finished',
-    startTime: '2024-12-12T10:00:00Z',
-    endTime: '2024-12-12T10:45:00Z',
-    provider: { id: 'prov-nxg-002', name: 'Dr. Robert Harris' },
-    facility: { id: 'fac-nxg-004', name: 'San Antonio Heart Center' },
-    reason: 'Cardiac follow-up, post-stent placement',
-    sourceSystem: 'nextgen',
-    sourceId: 'nextgen-e-004',
-    lastUpdated: '2024-12-12T10:45:00Z',
-  },
-];
+// Generate initial mock data in native NextGen format
+function generateMockData(count: number = 5): NextGenNativeData[] {
+  return Array.from({ length: count }, () => {
+    const completePatient = generateCompleteNextGenPatient();
+    return {
+      patient: completePatient.patient,
+      encounters: completePatient.encounters,
+      problems: completePatient.problems,
+      allergies: completePatient.allergies,
+      medications: completePatient.medications,
+      labOrders: completePatient.labOrders,
+    };
+  });
+}
 
-const mockObservations: Observation[] = [
-  {
-    resourceType: 'Observation',
-    id: 'nextgen-o-001',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '29463-7', display: 'Body weight' }] },
-    subject: { reference: 'Patient/nextgen-p-001' },
-    effectiveDateTime: '2024-12-14T11:10:00Z',
-    valueQuantity: { value: 68, unit: 'kg', system: 'http://unitsofmeasure.org', code: 'kg' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'nextgen-o-002',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] },
-    subject: { reference: 'Patient/nextgen-p-002' },
-    effectiveDateTime: '2024-12-12T10:15:00Z',
-    valueQuantity: { value: 138, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'nextgen-o-003',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] },
-    subject: { reference: 'Patient/nextgen-p-002' },
-    effectiveDateTime: '2024-12-12T10:15:00Z',
-    valueQuantity: { value: 88, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'nextgen-o-004',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8310-5', display: 'Body temperature' }] },
-    subject: { reference: 'Patient/nextgen-p-003' },
-    effectiveDateTime: '2024-12-13T18:10:00Z',
-    valueQuantity: { value: 100.4, unit: 'degF', system: 'http://unitsofmeasure.org', code: '[degF]' },
-  },
-];
+// Initialize mock data store with native NextGen format
+const mockDataStore: NextGenNativeData[] = generateMockData(5);
 
-const mockConditions: Condition[] = [
-  {
-    resourceType: 'Condition',
-    id: 'nextgen-c-001',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '77386006', display: 'Pregnancy' }], text: 'Normal pregnancy' },
-    subject: { reference: 'Patient/nextgen-p-001' },
-    onsetDateTime: '2024-06-01',
-  },
-  {
-    resourceType: 'Condition',
-    id: 'nextgen-c-002',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '53741008', display: 'Coronary arteriosclerosis' }], text: 'Coronary artery disease' },
-    subject: { reference: 'Patient/nextgen-p-002' },
-    onsetDateTime: '2022-08-15',
-  },
-  {
-    resourceType: 'Condition',
-    id: 'nextgen-c-003',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '38341003', display: 'Hypertension' }], text: 'Essential hypertension' },
-    subject: { reference: 'Patient/nextgen-p-004' },
-    onsetDateTime: '2018-03-10',
-  },
-];
+// C-CDA documents received from NextGen (clinical document exchange)
+const mockCcdaDocuments: CCDADocument[] = generateCCDADocuments(3, 'NXG-');
 
-const mockDiagnosticReports: DiagnosticReport[] = [
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'nextgen-dr-001',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'RAD' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '11525-3', display: 'Obstetric ultrasound' }], text: 'Prenatal ultrasound' },
-    subject: { reference: 'Patient/nextgen-p-001' },
-    effectiveDateTime: '2024-12-14T12:00:00Z',
-    issued: '2024-12-14T13:00:00Z',
-    conclusion: 'Normal fetal development at 28 weeks',
-  },
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'nextgen-dr-002',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'LAB' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '2093-3', display: 'Cholesterol total' }], text: 'Lipid Panel' },
-    subject: { reference: 'Patient/nextgen-p-002' },
-    effectiveDateTime: '2024-12-11T08:00:00Z',
-    issued: '2024-12-11T14:00:00Z',
-    conclusion: 'Total cholesterol 195 mg/dL, within target range for high-risk patient',
-  },
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'nextgen-dr-003',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'RAD' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '30746-2', display: 'Chest X-ray' }], text: 'Chest X-ray PA and lateral' },
-    subject: { reference: 'Patient/nextgen-p-003' },
-    effectiveDateTime: '2024-12-13T18:30:00Z',
-    issued: '2024-12-13T19:00:00Z',
-    conclusion: 'Mild bronchial wall thickening consistent with acute bronchitis. No pneumonia.',
-  },
-];
+// HL7v2 messages received from NextGen (interface engine)
+const mockHl7v2Messages: HL7v2Message[] = generateHL7v2Messages(5, 'NXG-');
 
 // Simulate API latency
 const simulateLatency = () => new Promise(resolve => setTimeout(resolve, Math.random() * 200 + 100));
@@ -274,15 +74,15 @@ export class NextGenMockProvider extends BaseEhrProvider {
 
   constructor(config: ProviderConfig) {
     super('nextgen', config);
-    this.lastSyncTime = new Date(Date.now() - 15 * 60 * 1000); // 15 mins ago
+    this.lastSyncTime = new Date(Date.now() - 15 * 60 * 1000);
     this.connectionStatus = {
       id: 'nextgen-001',
       system: 'nextgen',
       name: 'NextGen Healthcare',
       status: 'connected',
       lastSync: this.lastSyncTime.toISOString(),
-      patientCount: 21456,
-      encounterCount: 78234,
+      patientCount: mockDataStore.length,
+      encounterCount: mockDataStore.reduce((sum, d) => sum + d.encounters.length, 0),
       pendingRecords: 0,
       apiVersion: 'v3.1',
       fhirVersion: 'R4',
@@ -311,55 +111,227 @@ export class NextGenMockProvider extends BaseEhrProvider {
     };
   }
 
-  async getPatients(params?: PaginationParams): Promise<PaginatedResponse<EhrPatient>> {
+  /**
+   * Get all native NextGen patient data for transformation
+   * This returns the raw NextGen REST API format that will be transformed to FHIR
+   */
+  async getNativePatientData(params?: PaginationParams): Promise<PaginatedResponse<NextGenNativeData>> {
     await simulateLatency();
     const limit = params?.limit || 10;
     const offset = params?.offset || 0;
-    const paginatedData = mockPatients.slice(offset, offset + limit);
+    const paginatedData = mockDataStore.slice(offset, offset + limit);
 
     return {
       data: paginatedData,
-      total: mockPatients.length,
+      total: mockDataStore.length,
       limit,
       offset,
-      hasMore: offset + limit < mockPatients.length,
+      hasMore: offset + limit < mockDataStore.length,
+    };
+  }
+
+  /**
+   * Get native NextGen patients (raw API format)
+   */
+  async getNativePatients(params?: PaginationParams): Promise<PaginatedResponse<NextGenPatient>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const patients = mockDataStore.map(d => d.patient);
+    const paginatedData = patients.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: patients.length,
+      limit,
+      offset,
+      hasMore: offset + limit < patients.length,
+    };
+  }
+
+  /**
+   * Get native NextGen encounters (raw API format)
+   */
+  async getNativeEncounters(params?: PaginationParams): Promise<PaginatedResponse<NextGenEncounter>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allEncounters = mockDataStore.flatMap(d => d.encounters);
+    const paginatedData = allEncounters.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allEncounters.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allEncounters.length,
+    };
+  }
+
+  /**
+   * Get native NextGen problems (raw API format)
+   */
+  async getNativeProblems(params?: PaginationParams): Promise<PaginatedResponse<NextGenProblem>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allProblems = mockDataStore.flatMap(d => d.problems);
+    const paginatedData = allProblems.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allProblems.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allProblems.length,
+    };
+  }
+
+  /**
+   * Get native NextGen allergies (raw API format)
+   */
+  async getNativeAllergies(params?: PaginationParams): Promise<PaginatedResponse<NextGenAllergy>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allAllergies = mockDataStore.flatMap(d => d.allergies);
+    const paginatedData = allAllergies.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allAllergies.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allAllergies.length,
+    };
+  }
+
+  /**
+   * Get native NextGen medications (raw API format)
+   */
+  async getNativeMedications(params?: PaginationParams): Promise<PaginatedResponse<NextGenMedication>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allMedications = mockDataStore.flatMap(d => d.medications);
+    const paginatedData = allMedications.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allMedications.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allMedications.length,
+    };
+  }
+
+  /**
+   * Get native NextGen lab orders (raw API format)
+   */
+  async getNativeLabOrders(params?: PaginationParams): Promise<PaginatedResponse<NextGenLabOrder>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allLabOrders = mockDataStore.flatMap(d => d.labOrders);
+    const paginatedData = allLabOrders.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allLabOrders.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allLabOrders.length,
+    };
+  }
+
+  // =============================================
+  // C-CDA Document Access (Clinical Document Exchange)
+  // These are XML documents exported from NextGen (CCD, Discharge Summary, Progress Notes)
+  // =============================================
+
+  /**
+   * Get C-CDA documents from NextGen's document exchange
+   */
+  async getCcdaDocuments(params?: PaginationParams): Promise<PaginatedResponse<CCDADocument>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const paginatedData = mockCcdaDocuments.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: mockCcdaDocuments.length,
+      limit,
+      offset,
+      hasMore: offset + limit < mockCcdaDocuments.length,
+    };
+  }
+
+  // =============================================
+  // HL7v2 Message Access (Interface Engine)
+  // These are pipe-delimited messages from NextGen (ADT admissions, ORU lab results)
+  // =============================================
+
+  /**
+   * Get HL7v2 messages from NextGen's interface engine
+   */
+  async getHl7v2Messages(params?: PaginationParams): Promise<PaginatedResponse<HL7v2Message>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const paginatedData = mockHl7v2Messages.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: mockHl7v2Messages.length,
+      limit,
+      offset,
+      hasMore: offset + limit < mockHl7v2Messages.length,
+    };
+  }
+
+  // =============================================
+  // Abstract method implementations (required by BaseEhrProvider)
+  // These convert native data to normalized EhrPatient/EhrEncounter format
+  // =============================================
+
+  async getPatients(params?: PaginationParams): Promise<PaginatedResponse<EhrPatient>> {
+    const nativeResult = await this.getNativePatients(params);
+    return {
+      ...nativeResult,
+      data: nativeResult.data.map(this.convertToEhrPatient),
     };
   }
 
   async getPatient(id: string): Promise<EhrPatient | null> {
-    await simulateLatency();
-    return mockPatients.find(p => p.id === id) || null;
+    const patient = mockDataStore.find(d => d.patient.person_id === id)?.patient;
+    return patient ? this.convertToEhrPatient(patient) : null;
   }
 
   async getEncounters(params?: PaginationParams): Promise<PaginatedResponse<EhrEncounter>> {
-    await simulateLatency();
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = mockEncounters.slice(offset, offset + limit);
-
+    const nativeResult = await this.getNativeEncounters(params);
     return {
-      data: paginatedData,
-      total: mockEncounters.length,
-      limit,
-      offset,
-      hasMore: offset + limit < mockEncounters.length,
+      ...nativeResult,
+      data: nativeResult.data.map(this.convertToEhrEncounter),
     };
   }
 
   async getEncounter(id: string): Promise<EhrEncounter | null> {
-    await simulateLatency();
-    return mockEncounters.find(e => e.id === id) || null;
+    const encounter = mockDataStore.flatMap(d => d.encounters).find(e => e.encounter_id === id);
+    return encounter ? this.convertToEhrEncounter(encounter) : null;
   }
 
   async getEncountersByPatient(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<EhrEncounter>> {
     await simulateLatency();
-    const patientEncounters = mockEncounters.filter(e => e.patientId === patientId);
+    const patientEncounters = mockDataStore
+      .flatMap(d => d.encounters)
+      .filter(e => e.person_id === patientId);
     const limit = params?.limit || 10;
     const offset = params?.offset || 0;
     const paginatedData = patientEncounters.slice(offset, offset + limit);
 
     return {
-      data: paginatedData,
+      data: paginatedData.map(this.convertToEhrEncounter),
       total: patientEncounters.length,
       limit,
       offset,
@@ -367,56 +339,80 @@ export class NextGenMockProvider extends BaseEhrProvider {
     };
   }
 
-  async getObservations(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Observation>> {
+  async getObservations(_patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Observation>> {
     await simulateLatency();
-    const patientObs = mockObservations.filter(o => o.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientObs.slice(offset, offset + limit);
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
 
+  async getConditions(_patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Condition>> {
+    await simulateLatency();
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
+
+  async getDiagnosticReports(_patientId: string, params?: PaginationParams): Promise<PaginatedResponse<DiagnosticReport>> {
+    await simulateLatency();
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
+
+  // Helper: Convert native NextGen patient to normalized EhrPatient
+  private convertToEhrPatient(nextgenPatient: NextGenPatient): EhrPatient {
     return {
-      data: paginatedData,
-      total: patientObs.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientObs.length,
+      id: `nextgen-p-${nextgenPatient.person_id}`,
+      mrn: nextgenPatient.mrn || `NXG-${nextgenPatient.person_id.slice(0, 8)}`,
+      firstName: nextgenPatient.first_name,
+      lastName: nextgenPatient.last_name,
+      middleName: nextgenPatient.middle_name,
+      dateOfBirth: nextgenPatient.date_of_birth,
+      gender: nextgenPatient.gender === 'M' ? 'male' : nextgenPatient.gender === 'F' ? 'female' : nextgenPatient.gender === 'O' ? 'other' : 'unknown',
+      email: nextgenPatient.email_address,
+      phone: nextgenPatient.home_phone || nextgenPatient.mobile_phone,
+      address: nextgenPatient.address ? {
+        street: nextgenPatient.address.address_line_1,
+        city: nextgenPatient.address.city,
+        state: nextgenPatient.address.state_code,
+        postalCode: nextgenPatient.address.postal_code,
+        country: nextgenPatient.address.country_code || 'USA',
+      } : undefined,
+      sourceSystem: 'nextgen',
+      sourceId: nextgenPatient.person_id,
+      lastUpdated: nextgenPatient.modified_timestamp,
     };
   }
 
-  async getConditions(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Condition>> {
-    await simulateLatency();
-    const patientConditions = mockConditions.filter(c => c.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientConditions.slice(offset, offset + limit);
-
-    return {
-      data: paginatedData,
-      total: patientConditions.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientConditions.length,
+  // Helper: Convert native NextGen encounter to normalized EhrEncounter
+  private convertToEhrEncounter(nextgenEncounter: NextGenEncounter): EhrEncounter {
+    const statusMap: Record<string, 'planned' | 'arrived' | 'in-progress' | 'finished' | 'cancelled'> = {
+      'Open': 'in-progress',
+      'Closed': 'finished',
+      'Billed': 'finished',
+      'Void': 'cancelled',
     };
-  }
-
-  async getDiagnosticReports(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<DiagnosticReport>> {
-    await simulateLatency();
-    const patientReports = mockDiagnosticReports.filter(r => r.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientReports.slice(offset, offset + limit);
 
     return {
-      data: paginatedData,
-      total: patientReports.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientReports.length,
+      id: `nextgen-e-${nextgenEncounter.encounter_id}`,
+      patientId: `nextgen-p-${nextgenEncounter.person_id}`,
+      type: nextgenEncounter.encounter_type,
+      status: statusMap[nextgenEncounter.encounter_status] || 'in-progress',
+      startTime: nextgenEncounter.encounter_date,
+      endTime: nextgenEncounter.signed_date,
+      provider: nextgenEncounter.rendering_provider_id ? {
+        id: nextgenEncounter.rendering_provider_id,
+        name: nextgenEncounter.signed_by || 'Provider',
+      } : undefined,
+      reason: nextgenEncounter.chief_complaint,
+      sourceSystem: 'nextgen',
+      sourceId: nextgenEncounter.encounter_id,
+      lastUpdated: nextgenEncounter.modified_timestamp,
     };
   }
 
   updateLastSync(): void {
     this.lastSyncTime = new Date();
+  }
+
+  regenerateMockData(count: number = 5): void {
+    mockDataStore.length = 0;
+    mockDataStore.push(...generateMockData(count));
   }
 }
 

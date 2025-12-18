@@ -21,7 +21,7 @@ export interface SyncEvent {
   id: string;
   timestamp: string;
   system: EhrSystem;
-  type: 'patient' | 'encounter' | 'observation' | 'condition' | 'diagnostic_report';
+  type: 'patient' | 'encounter' | 'observation' | 'condition' | 'diagnostic_report' | 'document' | 'message';
   action: 'created' | 'updated' | 'deleted';
   resourceId: string;
   status: 'success' | 'failed' | 'pending';

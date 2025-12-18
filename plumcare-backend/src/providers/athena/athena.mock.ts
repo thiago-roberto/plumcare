@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { Observation, Condition, DiagnosticReport } from '@medplum/fhirtypes';
 import {
   BaseEhrProvider,
   type AuthResult,
@@ -11,302 +12,61 @@ import type {
   EhrEncounter,
   PaginationParams,
   PaginatedResponse,
-  Observation,
-  Condition,
-  DiagnosticReport,
 } from '../../types/index.js';
+import {
+  generateCompleteAthenaPatient,
+  type AthenaPatient,
+  type AthenaEncounter,
+  type AthenaProblem,
+  type AthenaAllergy,
+  type AthenaMedication,
+  type AthenaVitals,
+  type AthenaLabResult,
+} from '../../generators/athena.generator.js';
+import {
+  generateCCDADocuments,
+  type CCDADocument,
+} from '../../generators/ccda.generator.js';
+import {
+  generateHL7v2Messages,
+  type HL7v2Message,
+} from '../../generators/hl7v2.generator.js';
 
-// Mock data store
-const mockPatients: EhrPatient[] = [
-  {
-    id: 'athena-p-001',
-    mrn: 'ATH-12345',
-    firstName: 'Michael',
-    lastName: 'Johnson',
-    middleName: 'Robert',
-    dateOfBirth: '1978-03-15',
-    gender: 'male',
-    email: 'michael.johnson@email.com',
-    phone: '617-555-0123',
-    address: {
-      street: '123 Main Street',
-      city: 'Boston',
-      state: 'MA',
-      postalCode: '02108',
-      country: 'USA',
-    },
-    sourceSystem: 'athena',
-    sourceId: 'athena-p-001',
-    lastUpdated: '2024-12-10T09:00:00Z',
-  },
-  {
-    id: 'athena-p-002',
-    mrn: 'ATH-12346',
-    firstName: 'Sarah',
-    lastName: 'Williams',
-    middleName: 'Anne',
-    dateOfBirth: '1985-07-22',
-    gender: 'female',
-    email: 'sarah.williams@email.com',
-    phone: '617-555-0456',
-    address: {
-      street: '456 Oak Avenue',
-      city: 'Cambridge',
-      state: 'MA',
-      postalCode: '02139',
-      country: 'USA',
-    },
-    sourceSystem: 'athena',
-    sourceId: 'athena-p-002',
-    lastUpdated: '2024-12-12T14:30:00Z',
-  },
-  {
-    id: 'athena-p-003',
-    mrn: 'ATH-12347',
-    firstName: 'James',
-    lastName: 'Davis',
-    dateOfBirth: '1962-11-08',
-    gender: 'male',
-    phone: '617-555-0789',
-    address: {
-      city: 'Brookline',
-      state: 'MA',
-      postalCode: '02445',
-    },
-    sourceSystem: 'athena',
-    sourceId: 'athena-p-003',
-    lastUpdated: '2024-12-08T11:00:00Z',
-  },
-  {
-    id: 'athena-p-004',
-    mrn: 'ATH-12348',
-    firstName: 'Emily',
-    lastName: 'Chen',
-    dateOfBirth: '1992-04-18',
-    gender: 'female',
-    email: 'emily.chen@email.com',
-    phone: '617-555-1234',
-    address: {
-      street: '789 Pine Street',
-      city: 'Somerville',
-      state: 'MA',
-      postalCode: '02143',
-    },
-    sourceSystem: 'athena',
-    sourceId: 'athena-p-004',
-    lastUpdated: '2024-12-15T10:15:00Z',
-  },
-  {
-    id: 'athena-p-005',
-    mrn: 'ATH-12349',
-    firstName: 'Robert',
-    lastName: 'Martinez',
-    middleName: 'Luis',
-    dateOfBirth: '1955-09-30',
-    gender: 'male',
-    phone: '617-555-5678',
-    address: {
-      city: 'Newton',
-      state: 'MA',
-      postalCode: '02458',
-    },
-    sourceSystem: 'athena',
-    sourceId: 'athena-p-005',
-    lastUpdated: '2024-12-14T16:45:00Z',
-  },
-];
+// Native format data store - this is what Athena's REST API would actually return
+interface AthenaNativeData {
+  patient: AthenaPatient;
+  encounters: AthenaEncounter[];
+  problems: AthenaProblem[];
+  allergies: AthenaAllergy[];
+  medications: AthenaMedication[];
+  vitals: AthenaVitals[];
+  labResults: AthenaLabResult[];
+}
 
-const mockEncounters: EhrEncounter[] = [
-  {
-    id: 'athena-e-001',
-    patientId: 'athena-p-001',
-    type: 'Office Visit',
-    status: 'finished',
-    startTime: '2024-12-10T09:00:00Z',
-    endTime: '2024-12-10T09:30:00Z',
-    provider: { id: 'prov-001', name: 'Dr. Amanda Smith' },
-    facility: { id: 'fac-001', name: 'Boston Medical Center' },
-    reason: 'Annual physical examination',
-    sourceSystem: 'athena',
-    sourceId: 'athena-e-001',
-    lastUpdated: '2024-12-10T09:30:00Z',
-  },
-  {
-    id: 'athena-e-002',
-    patientId: 'athena-p-002',
-    type: 'Office Visit',
-    status: 'in-progress',
-    startTime: '2024-12-16T10:00:00Z',
-    provider: { id: 'prov-002', name: 'Dr. John Lee' },
-    facility: { id: 'fac-001', name: 'Boston Medical Center' },
-    reason: 'Follow-up for hypertension',
-    sourceSystem: 'athena',
-    sourceId: 'athena-e-002',
-    lastUpdated: '2024-12-16T10:00:00Z',
-  },
-  {
-    id: 'athena-e-003',
-    patientId: 'athena-p-003',
-    type: 'Telehealth',
-    status: 'finished',
-    startTime: '2024-12-14T14:00:00Z',
-    endTime: '2024-12-14T14:25:00Z',
-    provider: { id: 'prov-001', name: 'Dr. Amanda Smith' },
-    reason: 'Medication review',
-    sourceSystem: 'athena',
-    sourceId: 'athena-e-003',
-    lastUpdated: '2024-12-14T14:25:00Z',
-  },
-  {
-    id: 'athena-e-004',
-    patientId: 'athena-p-004',
-    type: 'Office Visit',
-    status: 'planned',
-    startTime: '2024-12-20T11:00:00Z',
-    provider: { id: 'prov-003', name: 'Dr. Maria Garcia' },
-    facility: { id: 'fac-002', name: 'Cambridge Health Alliance' },
-    reason: 'New patient consultation',
-    sourceSystem: 'athena',
-    sourceId: 'athena-e-004',
-    lastUpdated: '2024-12-15T09:00:00Z',
-  },
-  {
-    id: 'athena-e-005',
-    patientId: 'athena-p-001',
-    type: 'Lab Visit',
-    status: 'finished',
-    startTime: '2024-12-11T08:00:00Z',
-    endTime: '2024-12-11T08:15:00Z',
-    facility: { id: 'fac-003', name: 'Quest Diagnostics' },
-    reason: 'Blood work - CBC, CMP',
-    sourceSystem: 'athena',
-    sourceId: 'athena-e-005',
-    lastUpdated: '2024-12-11T08:15:00Z',
-  },
-];
+// Generate initial mock data in native Athena format
+function generateMockData(count: number = 5): AthenaNativeData[] {
+  return Array.from({ length: count }, () => {
+    const completePatient = generateCompleteAthenaPatient();
+    return {
+      patient: completePatient.patient,
+      encounters: completePatient.encounters,
+      problems: completePatient.problems,
+      allergies: completePatient.allergies,
+      medications: completePatient.medications,
+      vitals: completePatient.vitals,
+      labResults: completePatient.labResults,
+    };
+  });
+}
 
-const mockObservations: Observation[] = [
-  {
-    resourceType: 'Observation',
-    id: 'athena-o-001',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8867-4', display: 'Heart rate' }] },
-    subject: { reference: 'Patient/athena-p-001' },
-    effectiveDateTime: '2024-12-10T09:15:00Z',
-    valueQuantity: { value: 72, unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'athena-o-002',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] },
-    subject: { reference: 'Patient/athena-p-001' },
-    effectiveDateTime: '2024-12-10T09:15:00Z',
-    valueQuantity: { value: 120, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'athena-o-003',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] },
-    subject: { reference: 'Patient/athena-p-001' },
-    effectiveDateTime: '2024-12-10T09:15:00Z',
-    valueQuantity: { value: 80, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'athena-o-004',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8310-5', display: 'Body temperature' }] },
-    subject: { reference: 'Patient/athena-p-001' },
-    effectiveDateTime: '2024-12-10T09:15:00Z',
-    valueQuantity: { value: 98.6, unit: 'degF', system: 'http://unitsofmeasure.org', code: '[degF]' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'athena-o-005',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8867-4', display: 'Heart rate' }] },
-    subject: { reference: 'Patient/athena-p-002' },
-    effectiveDateTime: '2024-12-16T10:10:00Z',
-    valueQuantity: { value: 78, unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
-  },
-];
+// Initialize mock data store with native Athena format
+const mockDataStore: AthenaNativeData[] = generateMockData(5);
 
-const mockConditions: Condition[] = [
-  {
-    resourceType: 'Condition',
-    id: 'athena-c-001',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '38341003', display: 'Hypertension' }], text: 'Essential hypertension' },
-    subject: { reference: 'Patient/athena-p-002' },
-    onsetDateTime: '2020-06-15',
-  },
-  {
-    resourceType: 'Condition',
-    id: 'athena-c-002',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '73211009', display: 'Diabetes mellitus' }], text: 'Type 2 diabetes mellitus' },
-    subject: { reference: 'Patient/athena-p-003' },
-    onsetDateTime: '2018-03-20',
-  },
-  {
-    resourceType: 'Condition',
-    id: 'athena-c-003',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'resolved' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'encounter-diagnosis' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '195662009', display: 'Acute viral pharyngitis' }], text: 'Pharyngitis' },
-    subject: { reference: 'Patient/athena-p-001' },
-    onsetDateTime: '2024-11-15',
-    abatementDateTime: '2024-11-22',
-  },
-];
+// C-CDA documents received from Athena (clinical document exchange)
+const mockCcdaDocuments: CCDADocument[] = generateCCDADocuments(3, 'ATH-');
 
-const mockDiagnosticReports: DiagnosticReport[] = [
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'athena-dr-001',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'LAB' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '58410-2', display: 'Complete blood count' }], text: 'CBC with differential' },
-    subject: { reference: 'Patient/athena-p-001' },
-    effectiveDateTime: '2024-12-11T10:00:00Z',
-    issued: '2024-12-11T14:00:00Z',
-    conclusion: 'All values within normal limits',
-  },
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'athena-dr-002',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'LAB' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '24323-8', display: 'Comprehensive metabolic panel' }], text: 'CMP' },
-    subject: { reference: 'Patient/athena-p-001' },
-    effectiveDateTime: '2024-12-11T10:00:00Z',
-    issued: '2024-12-11T14:00:00Z',
-    conclusion: 'Glucose and lipids within normal range',
-  },
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'athena-dr-003',
-    status: 'preliminary',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'LAB' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '4548-4', display: 'Hemoglobin A1c' }], text: 'HbA1c' },
-    subject: { reference: 'Patient/athena-p-003' },
-    effectiveDateTime: '2024-12-14T09:00:00Z',
-    issued: '2024-12-14T16:00:00Z',
-    conclusion: 'HbA1c: 7.2% - slightly above target',
-  },
-];
+// HL7v2 messages received from Athena (interface engine)
+const mockHl7v2Messages: HL7v2Message[] = generateHL7v2Messages(5, 'ATH-');
 
 // Simulate API latency
 const simulateLatency = () => new Promise(resolve => setTimeout(resolve, Math.random() * 200 + 100));
@@ -324,9 +84,9 @@ export class AthenaMockProvider extends BaseEhrProvider {
       name: 'Athena Health',
       status: 'connected',
       lastSync: this.lastSyncTime.toISOString(),
-      patientCount: 12847,
-      encounterCount: 45632,
-      pendingRecords: 23,
+      patientCount: mockDataStore.length,
+      encounterCount: mockDataStore.reduce((sum, d) => sum + d.encounters.length, 0),
+      pendingRecords: 0,
       apiVersion: 'v1',
       fhirVersion: 'R4',
       capabilities: ['Patient', 'Encounter', 'Observation', 'Condition', 'DiagnosticReport', 'AllergyIntolerance', 'MedicationRequest'],
@@ -335,11 +95,10 @@ export class AthenaMockProvider extends BaseEhrProvider {
 
   async authenticate(): Promise<AuthResult> {
     await simulateLatency();
-    // Mock successful authentication
     return {
       accessToken: `mock-athena-token-${uuidv4()}`,
       refreshToken: `mock-athena-refresh-${uuidv4()}`,
-      expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour
+      expiresAt: new Date(Date.now() + 3600 * 1000),
     };
   }
 
@@ -355,55 +114,246 @@ export class AthenaMockProvider extends BaseEhrProvider {
     };
   }
 
-  async getPatients(params?: PaginationParams): Promise<PaginatedResponse<EhrPatient>> {
+  /**
+   * Get all native Athena patient data for transformation
+   * This returns the raw Athena REST API format that will be transformed to FHIR
+   */
+  async getNativePatientData(params?: PaginationParams): Promise<PaginatedResponse<AthenaNativeData>> {
     await simulateLatency();
     const limit = params?.limit || 10;
     const offset = params?.offset || 0;
-    const paginatedData = mockPatients.slice(offset, offset + limit);
+    const paginatedData = mockDataStore.slice(offset, offset + limit);
 
     return {
       data: paginatedData,
-      total: mockPatients.length,
+      total: mockDataStore.length,
       limit,
       offset,
-      hasMore: offset + limit < mockPatients.length,
+      hasMore: offset + limit < mockDataStore.length,
+    };
+  }
+
+  /**
+   * Get native Athena patients (raw API format)
+   */
+  async getNativePatients(params?: PaginationParams): Promise<PaginatedResponse<AthenaPatient>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const patients = mockDataStore.map(d => d.patient);
+    const paginatedData = patients.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: patients.length,
+      limit,
+      offset,
+      hasMore: offset + limit < patients.length,
+    };
+  }
+
+  /**
+   * Get native Athena encounters (raw API format)
+   */
+  async getNativeEncounters(params?: PaginationParams): Promise<PaginatedResponse<AthenaEncounter>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allEncounters = mockDataStore.flatMap(d => d.encounters);
+    const paginatedData = allEncounters.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allEncounters.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allEncounters.length,
+    };
+  }
+
+  /**
+   * Get native Athena problems (raw API format)
+   */
+  async getNativeProblems(params?: PaginationParams): Promise<PaginatedResponse<AthenaProblem>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allProblems = mockDataStore.flatMap(d => d.problems);
+    const paginatedData = allProblems.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allProblems.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allProblems.length,
+    };
+  }
+
+  /**
+   * Get native Athena allergies (raw API format)
+   */
+  async getNativeAllergies(params?: PaginationParams): Promise<PaginatedResponse<AthenaAllergy>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allAllergies = mockDataStore.flatMap(d => d.allergies);
+    const paginatedData = allAllergies.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allAllergies.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allAllergies.length,
+    };
+  }
+
+  /**
+   * Get native Athena medications (raw API format)
+   */
+  async getNativeMedications(params?: PaginationParams): Promise<PaginatedResponse<AthenaMedication>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allMedications = mockDataStore.flatMap(d => d.medications);
+    const paginatedData = allMedications.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allMedications.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allMedications.length,
+    };
+  }
+
+  /**
+   * Get native Athena vitals (raw API format)
+   */
+  async getNativeVitals(params?: PaginationParams): Promise<PaginatedResponse<AthenaVitals>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allVitals = mockDataStore.flatMap(d => d.vitals);
+    const paginatedData = allVitals.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allVitals.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allVitals.length,
+    };
+  }
+
+  /**
+   * Get native Athena lab results (raw API format)
+   */
+  async getNativeLabResults(params?: PaginationParams): Promise<PaginatedResponse<AthenaLabResult>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allLabResults = mockDataStore.flatMap(d => d.labResults);
+    const paginatedData = allLabResults.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allLabResults.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allLabResults.length,
+    };
+  }
+
+  // =============================================
+  // C-CDA Document Access (Clinical Document Exchange)
+  // These are XML documents exported from Athena (CCD, Discharge Summary, Progress Notes)
+  // =============================================
+
+  /**
+   * Get C-CDA documents from Athena's document exchange
+   */
+  async getCcdaDocuments(params?: PaginationParams): Promise<PaginatedResponse<CCDADocument>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const paginatedData = mockCcdaDocuments.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: mockCcdaDocuments.length,
+      limit,
+      offset,
+      hasMore: offset + limit < mockCcdaDocuments.length,
+    };
+  }
+
+  // =============================================
+  // HL7v2 Message Access (Interface Engine)
+  // These are pipe-delimited messages from Athena (ADT admissions, ORU lab results)
+  // =============================================
+
+  /**
+   * Get HL7v2 messages from Athena's interface engine
+   */
+  async getHl7v2Messages(params?: PaginationParams): Promise<PaginatedResponse<HL7v2Message>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const paginatedData = mockHl7v2Messages.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: mockHl7v2Messages.length,
+      limit,
+      offset,
+      hasMore: offset + limit < mockHl7v2Messages.length,
+    };
+  }
+
+  // =============================================
+  // Abstract method implementations (required by BaseEhrProvider)
+  // These convert native data to normalized EhrPatient/EhrEncounter format
+  // =============================================
+
+  async getPatients(params?: PaginationParams): Promise<PaginatedResponse<EhrPatient>> {
+    const nativeResult = await this.getNativePatients(params);
+    return {
+      ...nativeResult,
+      data: nativeResult.data.map(this.convertToEhrPatient),
     };
   }
 
   async getPatient(id: string): Promise<EhrPatient | null> {
-    await simulateLatency();
-    return mockPatients.find(p => p.id === id) || null;
+    const patient = mockDataStore.find(d => d.patient.patientid === id)?.patient;
+    return patient ? this.convertToEhrPatient(patient) : null;
   }
 
   async getEncounters(params?: PaginationParams): Promise<PaginatedResponse<EhrEncounter>> {
-    await simulateLatency();
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = mockEncounters.slice(offset, offset + limit);
-
+    const nativeResult = await this.getNativeEncounters(params);
     return {
-      data: paginatedData,
-      total: mockEncounters.length,
-      limit,
-      offset,
-      hasMore: offset + limit < mockEncounters.length,
+      ...nativeResult,
+      data: nativeResult.data.map(this.convertToEhrEncounter),
     };
   }
 
   async getEncounter(id: string): Promise<EhrEncounter | null> {
-    await simulateLatency();
-    return mockEncounters.find(e => e.id === id) || null;
+    const encounter = mockDataStore.flatMap(d => d.encounters).find(e => e.encounterid === id);
+    return encounter ? this.convertToEhrEncounter(encounter) : null;
   }
 
   async getEncountersByPatient(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<EhrEncounter>> {
     await simulateLatency();
-    const patientEncounters = mockEncounters.filter(e => e.patientId === patientId);
+    const patientEncounters = mockDataStore
+      .flatMap(d => d.encounters)
+      .filter(e => e.patientid === patientId);
     const limit = params?.limit || 10;
     const offset = params?.offset || 0;
     const paginatedData = patientEncounters.slice(offset, offset + limit);
 
     return {
-      data: paginatedData,
+      data: paginatedData.map(this.convertToEhrEncounter),
       total: patientEncounters.length,
       limit,
       offset,
@@ -413,55 +363,76 @@ export class AthenaMockProvider extends BaseEhrProvider {
 
   async getObservations(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Observation>> {
     await simulateLatency();
-    const patientObs = mockObservations.filter(o => o.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientObs.slice(offset, offset + limit);
-
-    return {
-      data: paginatedData,
-      total: patientObs.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientObs.length,
-    };
+    // Return empty for now - observations come through vitals in native format
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
   }
 
   async getConditions(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Condition>> {
     await simulateLatency();
-    const patientConditions = mockConditions.filter(c => c.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientConditions.slice(offset, offset + limit);
-
-    return {
-      data: paginatedData,
-      total: patientConditions.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientConditions.length,
-    };
+    // Return empty for now - conditions come through problems in native format
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
   }
 
   async getDiagnosticReports(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<DiagnosticReport>> {
     await simulateLatency();
-    const patientReports = mockDiagnosticReports.filter(r => r.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientReports.slice(offset, offset + limit);
+    // Return empty for now - reports come through labResults in native format
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
 
+  // Helper: Convert native Athena patient to normalized EhrPatient
+  private convertToEhrPatient(athenaPatient: AthenaPatient): EhrPatient {
     return {
-      data: paginatedData,
-      total: patientReports.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientReports.length,
+      id: `athena-p-${athenaPatient.patientid}`,
+      mrn: `ATH-${athenaPatient.patientid}`,
+      firstName: athenaPatient.firstname,
+      lastName: athenaPatient.lastname,
+      middleName: athenaPatient.middlename,
+      dateOfBirth: athenaPatient.dob,
+      gender: athenaPatient.sex === 'M' ? 'male' : athenaPatient.sex === 'F' ? 'female' : athenaPatient.sex === 'O' ? 'other' : 'unknown',
+      email: athenaPatient.email,
+      phone: athenaPatient.homephone || athenaPatient.mobilephone,
+      address: athenaPatient.address1 ? {
+        street: athenaPatient.address1,
+        city: athenaPatient.city,
+        state: athenaPatient.state,
+        postalCode: athenaPatient.zip,
+        country: athenaPatient.countrycode || 'USA',
+      } : undefined,
+      sourceSystem: 'athena',
+      sourceId: athenaPatient.patientid,
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+
+  // Helper: Convert native Athena encounter to normalized EhrEncounter
+  private convertToEhrEncounter(athenaEncounter: AthenaEncounter): EhrEncounter {
+    return {
+      id: `athena-e-${athenaEncounter.encounterid}`,
+      patientId: `athena-p-${athenaEncounter.patientid}`,
+      type: athenaEncounter.encountertype,
+      status: athenaEncounter.encounterstatus === 'CLOSED' ? 'finished' : athenaEncounter.encounterstatus === 'OPEN' ? 'in-progress' : 'planned',
+      startTime: athenaEncounter.encounterdate,
+      endTime: athenaEncounter.closeddatetime,
+      provider: {
+        id: athenaEncounter.providerid,
+        name: `${athenaEncounter.providerfirstname} ${athenaEncounter.providerlastname}`,
+      },
+      reason: athenaEncounter.diagnoses?.[0]?.description,
+      sourceSystem: 'athena',
+      sourceId: athenaEncounter.encounterid,
+      lastUpdated: new Date().toISOString(),
     };
   }
 
   // Update last sync time (called after sync operations)
   updateLastSync(): void {
     this.lastSyncTime = new Date();
+  }
+
+  // Regenerate mock data (useful for testing/demo)
+  regenerateMockData(count: number = 5): void {
+    mockDataStore.length = 0;
+    mockDataStore.push(...generateMockData(count));
   }
 }
 

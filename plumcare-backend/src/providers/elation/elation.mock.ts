@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { Observation, Condition, DiagnosticReport } from '@medplum/fhirtypes';
 import {
   BaseEhrProvider,
   type AuthResult,
@@ -11,196 +12,58 @@ import type {
   EhrEncounter,
   PaginationParams,
   PaginatedResponse,
-  Observation,
-  Condition,
-  DiagnosticReport,
 } from '../../types/index.js';
+import {
+  generateCompleteElationPatient,
+  type ElationPatient,
+  type ElationVisitNote,
+  type ElationProblem,
+  type ElationAllergy,
+  type ElationMedication,
+  type ElationLabOrder,
+} from '../../generators/elation.generator.js';
+import {
+  generateCCDADocuments,
+  type CCDADocument,
+} from '../../generators/ccda.generator.js';
+import {
+  generateHL7v2Messages,
+  type HL7v2Message,
+} from '../../generators/hl7v2.generator.js';
 
-// Mock data store
-const mockPatients: EhrPatient[] = [
-  {
-    id: 'elation-p-001',
-    mrn: 'ELA-67890',
-    firstName: 'Elena',
-    lastName: 'Martinez',
-    middleName: 'Maria',
-    dateOfBirth: '1990-01-28',
-    gender: 'female',
-    email: 'elena.martinez@email.com',
-    phone: '415-555-0123',
-    address: {
-      street: '100 Market Street',
-      city: 'San Francisco',
-      state: 'CA',
-      postalCode: '94102',
-      country: 'USA',
-    },
-    sourceSystem: 'elation',
-    sourceId: 'elation-p-001',
-    lastUpdated: '2024-12-15T14:00:00Z',
-  },
-  {
-    id: 'elation-p-002',
-    mrn: 'ELA-67891',
-    firstName: 'David',
-    lastName: 'Chen',
-    middleName: 'Wei',
-    dateOfBirth: '1975-09-14',
-    gender: 'male',
-    email: 'david.chen@email.com',
-    phone: '510-555-0456',
-    address: {
-      street: '200 Broadway',
-      city: 'Oakland',
-      state: 'CA',
-      postalCode: '94612',
-    },
-    sourceSystem: 'elation',
-    sourceId: 'elation-p-002',
-    lastUpdated: '2024-12-14T10:30:00Z',
-  },
-  {
-    id: 'elation-p-003',
-    mrn: 'ELA-67892',
-    firstName: 'Lisa',
-    lastName: 'Wong',
-    dateOfBirth: '1982-06-05',
-    gender: 'female',
-    phone: '415-555-0789',
-    address: {
-      city: 'San Jose',
-      state: 'CA',
-      postalCode: '95110',
-    },
-    sourceSystem: 'elation',
-    sourceId: 'elation-p-003',
-    lastUpdated: '2024-12-13T09:15:00Z',
-  },
-];
+// Native format data store - this is what Elation's REST API would actually return
+interface ElationNativeData {
+  patient: ElationPatient;
+  visitNotes: ElationVisitNote[];
+  problems: ElationProblem[];
+  allergies: ElationAllergy[];
+  medications: ElationMedication[];
+  labOrders: ElationLabOrder[];
+}
 
-const mockEncounters: EhrEncounter[] = [
-  {
-    id: 'elation-e-001',
-    patientId: 'elation-p-001',
-    type: 'Office Visit',
-    status: 'finished',
-    startTime: '2024-12-15T14:00:00Z',
-    endTime: '2024-12-15T14:45:00Z',
-    provider: { id: 'prov-ela-001', name: 'Dr. Jennifer Kim' },
-    facility: { id: 'fac-ela-001', name: 'Bay Area Family Practice' },
-    reason: 'Diabetes management',
-    sourceSystem: 'elation',
-    sourceId: 'elation-e-001',
-    lastUpdated: '2024-12-15T14:45:00Z',
-  },
-  {
-    id: 'elation-e-002',
-    patientId: 'elation-p-002',
-    type: 'Telehealth',
-    status: 'finished',
-    startTime: '2024-12-14T10:00:00Z',
-    endTime: '2024-12-14T10:20:00Z',
-    provider: { id: 'prov-ela-002', name: 'Dr. Michael Brown' },
-    reason: 'Follow-up consultation',
-    sourceSystem: 'elation',
-    sourceId: 'elation-e-002',
-    lastUpdated: '2024-12-14T10:20:00Z',
-  },
-  {
-    id: 'elation-e-003',
-    patientId: 'elation-p-001',
-    type: 'Lab Visit',
-    status: 'finished',
-    startTime: '2024-12-10T08:30:00Z',
-    endTime: '2024-12-10T08:45:00Z',
-    facility: { id: 'fac-ela-002', name: 'LabCorp San Francisco' },
-    reason: 'HbA1c and lipid panel',
-    sourceSystem: 'elation',
-    sourceId: 'elation-e-003',
-    lastUpdated: '2024-12-10T08:45:00Z',
-  },
-];
+// Generate initial mock data in native Elation format
+function generateMockData(count: number = 5): ElationNativeData[] {
+  return Array.from({ length: count }, () => {
+    const completePatient = generateCompleteElationPatient();
+    return {
+      patient: completePatient.patient,
+      visitNotes: completePatient.visitNotes,
+      problems: completePatient.problems,
+      allergies: completePatient.allergies,
+      medications: completePatient.medications,
+      labOrders: completePatient.labOrders,
+    };
+  });
+}
 
-const mockObservations: Observation[] = [
-  {
-    resourceType: 'Observation',
-    id: 'elation-o-001',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '4548-4', display: 'Hemoglobin A1c' }] },
-    subject: { reference: 'Patient/elation-p-001' },
-    effectiveDateTime: '2024-12-15T14:30:00Z',
-    valueQuantity: { value: 6.8, unit: '%', system: 'http://unitsofmeasure.org', code: '%' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'elation-o-002',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '29463-7', display: 'Body weight' }] },
-    subject: { reference: 'Patient/elation-p-001' },
-    effectiveDateTime: '2024-12-15T14:10:00Z',
-    valueQuantity: { value: 68, unit: 'kg', system: 'http://unitsofmeasure.org', code: 'kg' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'elation-o-003',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8867-4', display: 'Heart rate' }] },
-    subject: { reference: 'Patient/elation-p-001' },
-    effectiveDateTime: '2024-12-15T14:10:00Z',
-    valueQuantity: { value: 76, unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
-  },
-];
+// Initialize mock data store with native Elation format
+const mockDataStore: ElationNativeData[] = generateMockData(5);
 
-const mockConditions: Condition[] = [
-  {
-    resourceType: 'Condition',
-    id: 'elation-c-001',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '44054006', display: 'Type 2 diabetes mellitus' }], text: 'Type 2 diabetes mellitus' },
-    subject: { reference: 'Patient/elation-p-001' },
-    onsetDateTime: '2019-03-20',
-  },
-  {
-    resourceType: 'Condition',
-    id: 'elation-c-002',
-    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
-    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }],
-    code: { coding: [{ system: 'http://snomed.info/sct', code: '266569009', display: 'Seasonal allergic rhinitis' }], text: 'Seasonal allergies' },
-    subject: { reference: 'Patient/elation-p-002' },
-    onsetDateTime: '2015-04-01',
-  },
-];
+// C-CDA documents received from Elation (clinical document exchange)
+const mockCcdaDocuments: CCDADocument[] = generateCCDADocuments(3, 'ELA-');
 
-const mockDiagnosticReports: DiagnosticReport[] = [
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'elation-dr-001',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'LAB' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '24323-8', display: 'Comprehensive metabolic panel' }], text: 'CMP' },
-    subject: { reference: 'Patient/elation-p-001' },
-    effectiveDateTime: '2024-12-15T15:00:00Z',
-    issued: '2024-12-15T18:00:00Z',
-    conclusion: 'Glucose slightly elevated, consistent with diabetes diagnosis',
-  },
-  {
-    resourceType: 'DiagnosticReport',
-    id: 'elation-dr-002',
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0074', code: 'LAB' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '57698-3', display: 'Lipid panel' }], text: 'Lipid Panel' },
-    subject: { reference: 'Patient/elation-p-001' },
-    effectiveDateTime: '2024-12-10T09:00:00Z',
-    issued: '2024-12-10T14:00:00Z',
-    conclusion: 'LDL cholesterol mildly elevated at 142 mg/dL',
-  },
-];
+// HL7v2 messages received from Elation (interface engine)
+const mockHl7v2Messages: HL7v2Message[] = generateHL7v2Messages(5, 'ELA-');
 
 // Simulate API latency
 const simulateLatency = () => new Promise(resolve => setTimeout(resolve, Math.random() * 200 + 100));
@@ -211,16 +74,16 @@ export class ElationMockProvider extends BaseEhrProvider {
 
   constructor(config: ProviderConfig) {
     super('elation', config);
-    this.lastSyncTime = new Date(Date.now() - 2 * 60 * 1000); // 2 mins ago
+    this.lastSyncTime = new Date(Date.now() - 2 * 60 * 1000);
     this.connectionStatus = {
       id: 'elation-001',
       system: 'elation',
       name: 'Elation Health',
-      status: 'syncing',
+      status: 'connected',
       lastSync: this.lastSyncTime.toISOString(),
-      patientCount: 8234,
-      encounterCount: 29876,
-      pendingRecords: 156,
+      patientCount: mockDataStore.length,
+      encounterCount: mockDataStore.reduce((sum, d) => sum + d.visitNotes.length, 0),
+      pendingRecords: 0,
       apiVersion: 'v2',
       fhirVersion: 'R4',
       capabilities: ['Patient', 'Encounter', 'Observation', 'Condition', 'CarePlan', 'Immunization'],
@@ -248,112 +111,299 @@ export class ElationMockProvider extends BaseEhrProvider {
     };
   }
 
-  async getPatients(params?: PaginationParams): Promise<PaginatedResponse<EhrPatient>> {
+  /**
+   * Get all native Elation patient data for transformation
+   * This returns the raw Elation REST API format that will be transformed to FHIR
+   */
+  async getNativePatientData(params?: PaginationParams): Promise<PaginatedResponse<ElationNativeData>> {
     await simulateLatency();
     const limit = params?.limit || 10;
     const offset = params?.offset || 0;
-    const paginatedData = mockPatients.slice(offset, offset + limit);
+    const paginatedData = mockDataStore.slice(offset, offset + limit);
 
     return {
       data: paginatedData,
-      total: mockPatients.length,
+      total: mockDataStore.length,
       limit,
       offset,
-      hasMore: offset + limit < mockPatients.length,
+      hasMore: offset + limit < mockDataStore.length,
+    };
+  }
+
+  /**
+   * Get native Elation patients (raw API format)
+   */
+  async getNativePatients(params?: PaginationParams): Promise<PaginatedResponse<ElationPatient>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const patients = mockDataStore.map(d => d.patient);
+    const paginatedData = patients.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: patients.length,
+      limit,
+      offset,
+      hasMore: offset + limit < patients.length,
+    };
+  }
+
+  /**
+   * Get native Elation visit notes (raw API format)
+   */
+  async getNativeVisitNotes(params?: PaginationParams): Promise<PaginatedResponse<ElationVisitNote>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allVisitNotes = mockDataStore.flatMap(d => d.visitNotes);
+    const paginatedData = allVisitNotes.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allVisitNotes.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allVisitNotes.length,
+    };
+  }
+
+  /**
+   * Get native Elation problems (raw API format)
+   */
+  async getNativeProblems(params?: PaginationParams): Promise<PaginatedResponse<ElationProblem>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allProblems = mockDataStore.flatMap(d => d.problems);
+    const paginatedData = allProblems.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allProblems.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allProblems.length,
+    };
+  }
+
+  /**
+   * Get native Elation allergies (raw API format)
+   */
+  async getNativeAllergies(params?: PaginationParams): Promise<PaginatedResponse<ElationAllergy>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allAllergies = mockDataStore.flatMap(d => d.allergies);
+    const paginatedData = allAllergies.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allAllergies.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allAllergies.length,
+    };
+  }
+
+  /**
+   * Get native Elation medications (raw API format)
+   */
+  async getNativeMedications(params?: PaginationParams): Promise<PaginatedResponse<ElationMedication>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allMedications = mockDataStore.flatMap(d => d.medications);
+    const paginatedData = allMedications.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allMedications.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allMedications.length,
+    };
+  }
+
+  /**
+   * Get native Elation lab orders (raw API format)
+   */
+  async getNativeLabOrders(params?: PaginationParams): Promise<PaginatedResponse<ElationLabOrder>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const allLabOrders = mockDataStore.flatMap(d => d.labOrders);
+    const paginatedData = allLabOrders.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: allLabOrders.length,
+      limit,
+      offset,
+      hasMore: offset + limit < allLabOrders.length,
+    };
+  }
+
+  // =============================================
+  // C-CDA Document Access (Clinical Document Exchange)
+  // These are XML documents exported from Elation (CCD, Discharge Summary, Progress Notes)
+  // =============================================
+
+  /**
+   * Get C-CDA documents from Elation's document exchange
+   */
+  async getCcdaDocuments(params?: PaginationParams): Promise<PaginatedResponse<CCDADocument>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const paginatedData = mockCcdaDocuments.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: mockCcdaDocuments.length,
+      limit,
+      offset,
+      hasMore: offset + limit < mockCcdaDocuments.length,
+    };
+  }
+
+  // =============================================
+  // HL7v2 Message Access (Interface Engine)
+  // These are pipe-delimited messages from Elation (ADT admissions, ORU lab results)
+  // =============================================
+
+  /**
+   * Get HL7v2 messages from Elation's interface engine
+   */
+  async getHl7v2Messages(params?: PaginationParams): Promise<PaginatedResponse<HL7v2Message>> {
+    await simulateLatency();
+    const limit = params?.limit || 10;
+    const offset = params?.offset || 0;
+    const paginatedData = mockHl7v2Messages.slice(offset, offset + limit);
+
+    return {
+      data: paginatedData,
+      total: mockHl7v2Messages.length,
+      limit,
+      offset,
+      hasMore: offset + limit < mockHl7v2Messages.length,
+    };
+  }
+
+  // =============================================
+  // Abstract method implementations (required by BaseEhrProvider)
+  // These convert native data to normalized EhrPatient/EhrEncounter format
+  // =============================================
+
+  async getPatients(params?: PaginationParams): Promise<PaginatedResponse<EhrPatient>> {
+    const nativeResult = await this.getNativePatients(params);
+    return {
+      ...nativeResult,
+      data: nativeResult.data.map(this.convertToEhrPatient),
     };
   }
 
   async getPatient(id: string): Promise<EhrPatient | null> {
-    await simulateLatency();
-    return mockPatients.find(p => p.id === id) || null;
+    const patient = mockDataStore.find(d => d.patient.id.toString() === id)?.patient;
+    return patient ? this.convertToEhrPatient(patient) : null;
   }
 
   async getEncounters(params?: PaginationParams): Promise<PaginatedResponse<EhrEncounter>> {
-    await simulateLatency();
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = mockEncounters.slice(offset, offset + limit);
-
+    const nativeResult = await this.getNativeVisitNotes(params);
     return {
-      data: paginatedData,
-      total: mockEncounters.length,
-      limit,
-      offset,
-      hasMore: offset + limit < mockEncounters.length,
+      ...nativeResult,
+      data: nativeResult.data.map(this.convertToEhrEncounter),
     };
   }
 
   async getEncounter(id: string): Promise<EhrEncounter | null> {
-    await simulateLatency();
-    return mockEncounters.find(e => e.id === id) || null;
+    const visitNote = mockDataStore.flatMap(d => d.visitNotes).find(v => v.id.toString() === id);
+    return visitNote ? this.convertToEhrEncounter(visitNote) : null;
   }
 
   async getEncountersByPatient(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<EhrEncounter>> {
     await simulateLatency();
-    const patientEncounters = mockEncounters.filter(e => e.patientId === patientId);
+    const patientVisitNotes = mockDataStore
+      .flatMap(d => d.visitNotes)
+      .filter(v => v.patient.toString() === patientId);
     const limit = params?.limit || 10;
     const offset = params?.offset || 0;
-    const paginatedData = patientEncounters.slice(offset, offset + limit);
+    const paginatedData = patientVisitNotes.slice(offset, offset + limit);
 
     return {
-      data: paginatedData,
-      total: patientEncounters.length,
+      data: paginatedData.map(this.convertToEhrEncounter),
+      total: patientVisitNotes.length,
       limit,
       offset,
-      hasMore: offset + limit < patientEncounters.length,
+      hasMore: offset + limit < patientVisitNotes.length,
     };
   }
 
-  async getObservations(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Observation>> {
+  async getObservations(_patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Observation>> {
     await simulateLatency();
-    const patientObs = mockObservations.filter(o => o.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientObs.slice(offset, offset + limit);
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
+
+  async getConditions(_patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Condition>> {
+    await simulateLatency();
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
+
+  async getDiagnosticReports(_patientId: string, params?: PaginationParams): Promise<PaginatedResponse<DiagnosticReport>> {
+    await simulateLatency();
+    return { data: [], total: 0, limit: params?.limit || 10, offset: params?.offset || 0, hasMore: false };
+  }
+
+  // Helper: Convert native Elation patient to normalized EhrPatient
+  private convertToEhrPatient(elationPatient: ElationPatient): EhrPatient {
+    const primaryPhone = elationPatient.phones.find(p => p.is_primary)?.phone || elationPatient.phones[0]?.phone;
+    const primaryEmail = elationPatient.emails.find(e => e.is_primary)?.email || elationPatient.emails[0]?.email;
 
     return {
-      data: paginatedData,
-      total: patientObs.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientObs.length,
+      id: `elation-p-${elationPatient.id}`,
+      mrn: elationPatient.mrn || `ELA-${elationPatient.id}`,
+      firstName: elationPatient.first_name,
+      lastName: elationPatient.last_name,
+      middleName: elationPatient.middle_name,
+      dateOfBirth: elationPatient.dob,
+      gender: elationPatient.sex === 'Male' ? 'male' : elationPatient.sex === 'Female' ? 'female' : elationPatient.sex === 'Other' ? 'other' : 'unknown',
+      email: primaryEmail,
+      phone: primaryPhone,
+      address: elationPatient.address ? {
+        street: elationPatient.address.address_line1,
+        city: elationPatient.address.city,
+        state: elationPatient.address.state,
+        postalCode: elationPatient.address.zip,
+        country: elationPatient.address.country,
+      } : undefined,
+      sourceSystem: 'elation',
+      sourceId: elationPatient.id.toString(),
+      lastUpdated: elationPatient.last_modified_date,
     };
   }
 
-  async getConditions(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<Condition>> {
-    await simulateLatency();
-    const patientConditions = mockConditions.filter(c => c.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientConditions.slice(offset, offset + limit);
-
+  // Helper: Convert native Elation visit note to normalized EhrEncounter
+  private convertToEhrEncounter(visitNote: ElationVisitNote): EhrEncounter {
     return {
-      data: paginatedData,
-      total: patientConditions.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientConditions.length,
-    };
-  }
-
-  async getDiagnosticReports(patientId: string, params?: PaginationParams): Promise<PaginatedResponse<DiagnosticReport>> {
-    await simulateLatency();
-    const patientReports = mockDiagnosticReports.filter(r => r.subject?.reference === `Patient/${patientId}`);
-    const limit = params?.limit || 10;
-    const offset = params?.offset || 0;
-    const paginatedData = patientReports.slice(offset, offset + limit);
-
-    return {
-      data: paginatedData,
-      total: patientReports.length,
-      limit,
-      offset,
-      hasMore: offset + limit < patientReports.length,
+      id: `elation-e-${visitNote.id}`,
+      patientId: `elation-p-${visitNote.patient}`,
+      type: visitNote.visit_type,
+      status: visitNote.signed ? 'finished' : 'in-progress',
+      startTime: visitNote.document_date,
+      reason: visitNote.chief_complaint,
+      sourceSystem: 'elation',
+      sourceId: visitNote.id.toString(),
+      lastUpdated: visitNote.last_modified_date,
     };
   }
 
   updateLastSync(): void {
     this.lastSyncTime = new Date();
+  }
+
+  regenerateMockData(count: number = 5): void {
+    mockDataStore.length = 0;
+    mockDataStore.push(...generateMockData(count));
   }
 }
 

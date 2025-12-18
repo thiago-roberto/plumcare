@@ -1,9 +1,23 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { Bundle } from '@medplum/fhirtypes';
 import type { EhrSystem, SyncEvent, SyncResult } from '../types/index.js';
 import { getProvider, type ProviderConfig } from '../providers/base.provider.js';
-import { transformPatientsBatch, transformEncountersBatch } from './transform.service.js';
-import { batchUpsertResources, createSyncAuditEvent } from './medplum.service.js';
+import { getMedplumClient, createSyncAuditEvent } from './medplum.service.js';
 import { config } from '../config/index.js';
+
+// EHR-specific transformers - these handle the native format → FHIR conversion
+import { parseAthenaJsonToFhir } from '../transforms/athena.transform.js';
+import { parseElationJsonToFhir } from '../transforms/elation.transform.js';
+import { parseNextgenJsonToFhir } from '../transforms/nextgen.transform.js';
+
+// C-CDA and HL7v2 transformers - for clinical documents and interface messages
+import { parseCcdaToFhir } from '../transforms/ccda.transform.js';
+import { parseHL7v2ToFhir } from '../transforms/hl7v2.transform.js';
+
+// Import mock provider types for native data access
+import { AthenaMockProvider } from '../providers/athena/athena.mock.js';
+import { ElationMockProvider } from '../providers/elation/elation.mock.js';
+import { NextGenMockProvider } from '../providers/nextgen/nextgen.mock.js';
 
 // In-memory store for sync events (in production, use database)
 const syncEvents: SyncEvent[] = [];
@@ -16,96 +30,389 @@ function getProviderConfig(system: EhrSystem): ProviderConfig {
 }
 
 /**
- * Perform a full sync for an EHR system
+ * Execute a FHIR transaction bundle against Medplum
  */
-export async function performSync(system: EhrSystem): Promise<SyncResult> {
-  const startTime = Date.now();
+async function executeFhirBundle(bundle: Bundle): Promise<{ success: boolean; resourceCount: number; errors: string[] }> {
+  const medplum = getMedplumClient();
+  const errors: string[] = [];
+  let resourceCount = 0;
+
+  try {
+    // Execute the bundle as a transaction
+    const result = await medplum.executeBatch(bundle);
+
+    // Count successful entries
+    if (result.entry) {
+      for (const entry of result.entry) {
+        if (entry.response?.status?.startsWith('2')) {
+          resourceCount++;
+        } else {
+          errors.push(`Failed to create resource: ${entry.response?.status}`);
+        }
+      }
+    }
+
+    return { success: errors.length === 0, resourceCount, errors };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error executing bundle';
+    errors.push(errorMsg);
+    return { success: false, resourceCount, errors };
+  }
+}
+
+/**
+ * Perform a full sync for Athena - uses native format transformation
+ * Syncs: REST API data (JSON), C-CDA documents (XML), HL7v2 messages (pipe-delimited)
+ */
+async function syncAthena(): Promise<{ syncedResources: number; events: SyncEvent[]; errors: string[] }> {
   const events: SyncEvent[] = [];
   const errors: string[] = [];
   let syncedResources = 0;
 
-  try {
-    const providerConfig = getProviderConfig(system);
-    const provider = getProvider(system, providerConfig);
+  const providerConfig = getProviderConfig('athena');
+  const provider = getProvider('athena', providerConfig) as AthenaMockProvider;
 
-    // Authenticate
-    await provider.authenticate();
+  await provider.authenticate();
 
-    // Sync patients
-    const patientsResult = await provider.getPatients({ limit: 100 });
-    if (patientsResult.data.length > 0) {
-      const fhirPatients = transformPatientsBatch(patientsResult.data);
+  // ========================================
+  // 1. Sync REST API data (JSON format)
+  // ========================================
+  const nativeDataResult = await provider.getNativePatientData({ limit: 100 });
 
-      try {
-        await batchUpsertResources(fhirPatients);
-        syncedResources += fhirPatients.length;
+  for (const nativeData of nativeDataResult.data) {
+    try {
+      const fhirBundle = parseAthenaJsonToFhir({
+        patient: nativeData.patient,
+        encounters: nativeData.encounters,
+        problems: nativeData.problems,
+        allergies: nativeData.allergies,
+        medications: nativeData.medications,
+        vitals: nativeData.vitals,
+        labResults: nativeData.labResults,
+      });
 
-        for (const patient of fhirPatients) {
-          const event = createSyncEvent(system, 'patient', 'created', patient.id!, 'success', 'Patient synced successfully');
-          events.push(event);
-          syncEvents.unshift(event);
-        }
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        errors.push(`Failed to sync patients: ${errorMsg}`);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
 
-        const event = createSyncEvent(system, 'patient', 'created', 'batch', 'failed', errorMsg);
+      if (result.success) {
+        const event = createSyncEvent('athena', 'patient', 'created', `Patient/${nativeData.patient.patientid}`, 'success',
+          `[REST API JSON] Synced patient with ${nativeData.encounters.length} encounters, ${nativeData.problems.length} problems`);
         events.push(event);
         syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
       }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync Athena JSON: ${errorMsg}`);
     }
+  }
 
-    // Sync encounters
-    const encountersResult = await provider.getEncounters({ limit: 100 });
-    if (encountersResult.data.length > 0) {
-      const fhirEncounters = transformEncountersBatch(encountersResult.data);
+  // ========================================
+  // 2. Sync C-CDA Documents (XML format)
+  // ========================================
+  const ccdaResult = await provider.getCcdaDocuments({ limit: 100 });
 
-      try {
-        await batchUpsertResources(fhirEncounters);
-        syncedResources += fhirEncounters.length;
+  for (const ccdaDoc of ccdaResult.data) {
+    try {
+      const fhirBundle = parseCcdaToFhir(ccdaDoc);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
 
-        for (const encounter of fhirEncounters) {
-          const event = createSyncEvent(system, 'encounter', 'created', encounter.id!, 'success', 'Encounter synced successfully');
-          events.push(event);
-          syncEvents.unshift(event);
-        }
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        errors.push(`Failed to sync encounters: ${errorMsg}`);
+      if (result.success) {
+        const event = createSyncEvent('athena', 'document', 'created', `Document/${ccdaDoc.documentId}`, 'success',
+          `[C-CDA ${ccdaDoc.templateType}] Parsed XML clinical document to ${result.resourceCount} FHIR resources`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync Athena C-CDA: ${errorMsg}`);
+    }
+  }
 
-        const event = createSyncEvent(system, 'encounter', 'created', 'batch', 'failed', errorMsg);
+  // ========================================
+  // 3. Sync HL7v2 Messages (pipe-delimited)
+  // ========================================
+  const hl7Result = await provider.getHl7v2Messages({ limit: 100 });
+
+  for (const hl7Msg of hl7Result.data) {
+    try {
+      const fhirBundle = parseHL7v2ToFhir(hl7Msg);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('athena', 'message', 'created', `Message/${hl7Msg.parsed.messageControlId}`, 'success',
+          `[HL7v2 ${hl7Msg.messageType}] Parsed pipe-delimited message to ${result.resourceCount} FHIR resources`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync Athena HL7v2: ${errorMsg}`);
+    }
+  }
+
+  return { syncedResources, events, errors };
+}
+
+/**
+ * Perform a full sync for Elation - uses native format transformation
+ * Syncs: REST API data (JSON), C-CDA documents (XML), HL7v2 messages (pipe-delimited)
+ */
+async function syncElation(): Promise<{ syncedResources: number; events: SyncEvent[]; errors: string[] }> {
+  const events: SyncEvent[] = [];
+  const errors: string[] = [];
+  let syncedResources = 0;
+
+  const providerConfig = getProviderConfig('elation');
+  const provider = getProvider('elation', providerConfig) as ElationMockProvider;
+
+  await provider.authenticate();
+
+  // ========================================
+  // 1. Sync REST API data (JSON format)
+  // ========================================
+  const nativeDataResult = await provider.getNativePatientData({ limit: 100 });
+
+  for (const nativeData of nativeDataResult.data) {
+    try {
+      const fhirBundle = parseElationJsonToFhir({
+        patient: nativeData.patient,
+        visitNotes: nativeData.visitNotes,
+        problems: nativeData.problems,
+        allergies: nativeData.allergies,
+        medications: nativeData.medications,
+        labOrders: nativeData.labOrders,
+      });
+
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('elation', 'patient', 'created', `Patient/${nativeData.patient.id}`, 'success',
+          `[REST API JSON] Synced patient with ${nativeData.visitNotes.length} visits, ${nativeData.problems.length} problems`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync Elation JSON: ${errorMsg}`);
+    }
+  }
+
+  // ========================================
+  // 2. Sync C-CDA Documents (XML format)
+  // ========================================
+  const ccdaResult = await provider.getCcdaDocuments({ limit: 100 });
+
+  for (const ccdaDoc of ccdaResult.data) {
+    try {
+      const fhirBundle = parseCcdaToFhir(ccdaDoc);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('elation', 'document', 'created', `Document/${ccdaDoc.documentId}`, 'success',
+          `[C-CDA ${ccdaDoc.templateType}] Parsed XML clinical document to ${result.resourceCount} FHIR resources`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync Elation C-CDA: ${errorMsg}`);
+    }
+  }
+
+  // ========================================
+  // 3. Sync HL7v2 Messages (pipe-delimited)
+  // ========================================
+  const hl7Result = await provider.getHl7v2Messages({ limit: 100 });
+
+  for (const hl7Msg of hl7Result.data) {
+    try {
+      const fhirBundle = parseHL7v2ToFhir(hl7Msg);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('elation', 'message', 'created', `Message/${hl7Msg.parsed.messageControlId}`, 'success',
+          `[HL7v2 ${hl7Msg.messageType}] Parsed pipe-delimited message to ${result.resourceCount} FHIR resources`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync Elation HL7v2: ${errorMsg}`);
+    }
+  }
+
+  return { syncedResources, events, errors };
+}
+
+/**
+ * Perform a full sync for NextGen - uses native format transformation
+ * Syncs: REST API data (JSON), C-CDA documents (XML), HL7v2 messages (pipe-delimited)
+ */
+async function syncNextGen(): Promise<{ syncedResources: number; events: SyncEvent[]; errors: string[] }> {
+  const events: SyncEvent[] = [];
+  const errors: string[] = [];
+  let syncedResources = 0;
+
+  const providerConfig = getProviderConfig('nextgen');
+  const provider = getProvider('nextgen', providerConfig) as NextGenMockProvider;
+
+  await provider.authenticate();
+
+  // ========================================
+  // 1. Sync REST API data (JSON format)
+  // ========================================
+  const nativeDataResult = await provider.getNativePatientData({ limit: 100 });
+
+  for (const nativeData of nativeDataResult.data) {
+    try {
+      const fhirBundle = parseNextgenJsonToFhir({
+        patient: nativeData.patient,
+        encounters: nativeData.encounters,
+        problems: nativeData.problems,
+        allergies: nativeData.allergies,
+        medications: nativeData.medications,
+        labOrders: nativeData.labOrders,
+      });
+
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('nextgen', 'patient', 'created', `Patient/${nativeData.patient.person_id}`, 'success',
+          `[REST API JSON] Synced patient with ${nativeData.encounters.length} encounters, ${nativeData.problems.length} problems`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+        const event = createSyncEvent('nextgen', 'patient', 'created', `Patient/${nativeData.patient.person_id}`, 'failed', result.errors.join('; '));
         events.push(event);
         syncEvents.unshift(event);
       }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync NextGen JSON: ${errorMsg}`);
+    }
+  }
+
+  // ========================================
+  // 2. Sync C-CDA Documents (XML format)
+  // ========================================
+  const ccdaResult = await provider.getCcdaDocuments({ limit: 100 });
+
+  for (const ccdaDoc of ccdaResult.data) {
+    try {
+      const fhirBundle = parseCcdaToFhir(ccdaDoc);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('nextgen', 'document', 'created', `Document/${ccdaDoc.documentId}`, 'success',
+          `[C-CDA ${ccdaDoc.templateType}] Parsed XML clinical document to ${result.resourceCount} FHIR resources`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync NextGen C-CDA: ${errorMsg}`);
+    }
+  }
+
+  // ========================================
+  // 3. Sync HL7v2 Messages (pipe-delimited)
+  // ========================================
+  const hl7Result = await provider.getHl7v2Messages({ limit: 100 });
+
+  for (const hl7Msg of hl7Result.data) {
+    try {
+      const fhirBundle = parseHL7v2ToFhir(hl7Msg);
+      const result = await executeFhirBundle(fhirBundle);
+      syncedResources += result.resourceCount;
+
+      if (result.success) {
+        const event = createSyncEvent('nextgen', 'message', 'created', `Message/${hl7Msg.parsed.messageControlId}`, 'success',
+          `[HL7v2 ${hl7Msg.messageType}] Parsed pipe-delimited message to ${result.resourceCount} FHIR resources`);
+        events.push(event);
+        syncEvents.unshift(event);
+      } else {
+        errors.push(...result.errors);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Failed to transform/sync NextGen HL7v2: ${errorMsg}`);
+    }
+  }
+
+  return { syncedResources, events, errors };
+}
+
+/**
+ * Perform a full sync for an EHR system
+ * Now uses native format data and EHR-specific transformers
+ */
+export async function performSync(system: EhrSystem): Promise<SyncResult> {
+  const startTime = Date.now();
+
+  try {
+    let result: { syncedResources: number; events: SyncEvent[]; errors: string[] };
+
+    // Route to system-specific sync function
+    switch (system) {
+      case 'athena':
+        result = await syncAthena();
+        break;
+      case 'elation':
+        result = await syncElation();
+        break;
+      case 'nextgen':
+        result = await syncNextGen();
+        break;
+      default:
+        throw new Error(`Unknown EHR system: ${system}`);
     }
 
     // Log audit event
     await createSyncAuditEvent({
       action: 'C',
-      outcome: errors.length === 0 ? '0' : '4',
+      outcome: result.errors.length === 0 ? '0' : '4',
       source: system,
-      description: `Synced ${syncedResources} resources from ${system} in ${Date.now() - startTime}ms`,
+      description: `Synced ${result.syncedResources} FHIR resources from ${system} (native format) in ${Date.now() - startTime}ms`,
     }).catch(console.error);
 
     return {
-      success: errors.length === 0,
-      syncedResources,
-      errors,
-      events,
+      success: result.errors.length === 0,
+      syncedResources: result.syncedResources,
+      errors: result.errors,
+      events: result.events,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    errors.push(`Sync failed: ${errorMsg}`);
-
     const event = createSyncEvent(system, 'patient', 'created', 'sync', 'failed', errorMsg);
-    events.push(event);
     syncEvents.unshift(event);
 
     return {
       success: false,
-      syncedResources,
-      errors,
-      events,
+      syncedResources: 0,
+      errors: [`Sync failed: ${errorMsg}`],
+      events: [event],
     };
   }
 }
@@ -181,11 +488,9 @@ export function clearSyncEvents(): void {
  */
 export function initializeDemoSyncEvents(): void {
   const demoEvents: Array<Omit<SyncEvent, 'id' | 'timestamp'>> = [
-    { system: 'athena', type: 'patient', action: 'updated', resourceId: 'Patient/athena-p-001', status: 'success', details: 'Demographics updated' },
-    { system: 'athena', type: 'encounter', action: 'created', resourceId: 'Encounter/athena-e-002', status: 'success', details: 'New office visit created' },
-    { system: 'elation', type: 'observation', action: 'created', resourceId: 'Observation/elation-o-001', status: 'success', details: 'Vital signs recorded' },
-    { system: 'nextgen', type: 'condition', action: 'updated', resourceId: 'Condition/nextgen-c-001', status: 'success', details: 'Diagnosis status changed' },
-    { system: 'athena', type: 'diagnostic_report', action: 'created', resourceId: 'DiagnosticReport/athena-dr-001', status: 'pending', details: 'Lab results pending verification' },
+    { system: 'athena', type: 'patient', action: 'created', resourceId: 'Patient/athena-demo-001', status: 'success', details: 'Native Athena JSON → FHIR transformation complete' },
+    { system: 'elation', type: 'patient', action: 'created', resourceId: 'Patient/elation-demo-001', status: 'success', details: 'Native Elation JSON → FHIR transformation complete' },
+    { system: 'nextgen', type: 'patient', action: 'created', resourceId: 'Patient/nextgen-demo-001', status: 'success', details: 'Native NextGen JSON → FHIR transformation complete' },
   ];
 
   // Add with staggered timestamps
@@ -193,7 +498,7 @@ export function initializeDemoSyncEvents(): void {
     const fullEvent: SyncEvent = {
       ...event,
       id: `sync-demo-${index}`,
-      timestamp: new Date(Date.now() - index * 2 * 60 * 1000).toISOString(), // 2 mins apart
+      timestamp: new Date(Date.now() - index * 2 * 60 * 1000).toISOString(),
     };
     syncEvents.push(fullEvent);
   });

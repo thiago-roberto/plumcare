@@ -115,6 +115,7 @@ export function EhrIntegrationsPage(): JSX.Element {
   const medplum = useMedplum();
   const [ehrStats, setEhrStats] = useState<EhrStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Mock data sync state
@@ -125,50 +126,59 @@ export function EhrIntegrationsPage(): JSX.Element {
   const [syncResult, setSyncResult] = useState<MockDataSyncResponse | null>(null);
   const [syncHistory, setSyncHistory] = useState<SyncActivity[]>(() => loadSyncHistory());
 
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (isRefresh = false) => {
+    console.log('fetchStats called, isRefresh:', isRefresh);
     try {
-      setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError(null);
 
-      // Fetch resources from Medplum
-      const [patients, encounters, observations, conditions] = await Promise.all([
-        medplum.searchResources('Patient', { _count: '500' }),
-        medplum.searchResources('Encounter', { _count: '500' }),
-        medplum.searchResources('Observation', { _count: '500' }),
-        medplum.searchResources('Condition', { _count: '500' }),
+      // Fetch resources from Medplum - use invalidateSearches to bypass cache on refresh
+      if (isRefresh) {
+        medplum.invalidateSearches('Patient');
+        medplum.invalidateSearches('Encounter');
+        medplum.invalidateSearches('Observation');
+        medplum.invalidateSearches('Condition');
+      }
+
+      console.log('Fetching from Medplum...');
+
+      // Query counts per EHR system using tag filters - this avoids the 1000 result cap
+      // by getting accurate totals from the server
+      const countQueries = EHR_SYSTEMS.flatMap(ehr => [
+        medplum.search('Patient', { _tag: `${EHR_SOURCE_SYSTEM}|${ehr}`, _total: 'accurate', _count: '0' }),
+        medplum.search('Encounter', { _tag: `${EHR_SOURCE_SYSTEM}|${ehr}`, _total: 'accurate', _count: '0' }),
+        medplum.search('Observation', { _tag: `${EHR_SOURCE_SYSTEM}|${ehr}`, _total: 'accurate', _count: '0' }),
+        medplum.search('Condition', { _tag: `${EHR_SOURCE_SYSTEM}|${ehr}`, _total: 'accurate', _count: '0' }),
       ]);
 
-      // Count by EHR source
+      console.log('Query example:', `_tag=${EHR_SOURCE_SYSTEM}|athena`);
+
+      const results = await Promise.all(countQueries);
+
+      console.log('Raw results:', results.map((r, i) => ({ index: i, total: r.total })));
+
+      // Parse results - 4 queries per EHR (patient, encounter, observation, condition)
       const counts: Record<EhrSystem, { patients: number; encounters: number; observations: number; conditions: number }> = {
         athena: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
         elation: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
         nextgen: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
-        medplum: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
       };
 
-      patients.forEach(p => {
-        const source = getEhrSource(p);
-        if (source) counts[source].patients++;
+      EHR_SYSTEMS.forEach((ehr, ehrIndex) => {
+        const baseIndex = ehrIndex * 4;
+        counts[ehr] = {
+          patients: results[baseIndex].total || 0,
+          encounters: results[baseIndex + 1].total || 0,
+          observations: results[baseIndex + 2].total || 0,
+          conditions: results[baseIndex + 3].total || 0,
+        };
       });
 
-      encounters.forEach(e => {
-        const source = getEhrSource(e);
-        if (source) counts[source].encounters++;
-      });
-
-      observations.forEach(o => {
-        const tag = o.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
-        if (tag?.code && EHR_SYSTEMS.includes(tag.code as EhrSystem)) {
-          counts[tag.code as EhrSystem].observations++;
-        }
-      });
-
-      conditions.forEach(c => {
-        const tag = c.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
-        if (tag?.code && EHR_SYSTEMS.includes(tag.code as EhrSystem)) {
-          counts[tag.code as EhrSystem].conditions++;
-        }
-      });
+      console.log('Counts by EHR (from server totals):', counts);
 
       const stats: EhrStats[] = EHR_SYSTEMS.map(system => ({
         system,
@@ -184,6 +194,7 @@ export function EhrIntegrationsPage(): JSX.Element {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [medplum]);
 
@@ -270,9 +281,11 @@ export function EhrIntegrationsPage(): JSX.Element {
           </Box>
           <Group>
             <Button
-              leftSection={<IconRefresh size={16} />}
+              leftSection={<IconRefresh size={16} className={refreshing ? classes.spinning : ''} />}
               variant="subtle"
-              onClick={fetchStats}
+              onClick={() => fetchStats(true)}
+              loading={refreshing}
+              loaderProps={{ size: 'xs' }}
             >
               Refresh
             </Button>
