@@ -4,6 +4,9 @@ import { syncRouter } from './sync.js';
 import { mockDataRouter } from './mock-data.js';
 import { patientsRouter } from './patients.js';
 import { encountersRouter } from './encounters.js';
+import { subscriptionsRouter } from './subscriptions.js';
+import { botsRouter } from './bots.js';
+import { webhooksRouter } from './webhooks.js';
 
 // Import providers to register them
 import '../providers/athena/athena.mock.js';
@@ -20,6 +23,15 @@ router.use('/sync/mock-data', mockDataRouter);
 
 // Sync routes
 router.use('/sync', syncRouter);
+
+// Subscriptions - event-driven notifications (webhooks)
+router.use('/subscriptions', subscriptionsRouter);
+
+// Bots - serverless automation functions
+router.use('/bots', botsRouter);
+
+// Webhooks - receive notifications from Medplum subscriptions
+router.use('/webhooks', webhooksRouter);
 
 // EHR-specific data routes
 router.use('/', patientsRouter);

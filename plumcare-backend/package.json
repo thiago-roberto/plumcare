@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@faker-js/faker": "^10.1.0",
+    "@medplum/ccda": "^5.0.10",
     "@medplum/core": "^5.0.10",
     "@medplum/fhirtypes": "^5.0.10",
     "axios": "^1.7.9",

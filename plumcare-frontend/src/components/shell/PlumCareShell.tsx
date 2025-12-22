@@ -12,6 +12,7 @@ import {
   IconHome,
   IconLogout,
   IconPlugConnected,
+  IconRobot,
   IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react';
@@ -27,6 +28,7 @@ interface PlumCareShellProps {
 const navItems = [
   { icon: IconHome, label: 'Home', value: '/' },
   { icon: IconPlugConnected, label: 'EHR Integrations', value: '/ehr-integrations' },
+  { icon: IconRobot, label: 'Automation', value: '/automation' },
   { icon: IconUsers, label: 'Patients', value: '/patients' },
   { icon: IconUserPlus, label: 'New Patient', value: '/new-patient' },
 ];

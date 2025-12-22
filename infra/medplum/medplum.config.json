@@ -14,6 +14,8 @@
   "vmContextBotsEnabled": true,
   "defaultBotRuntimeVersion": "vmcontext",
   "shutdownTimeoutMilliseconds": 30000,
+  "heartbeatEnabled": true,
+  "heartbeatMilliseconds": 10000,
   "database": {
     "host": "postgres",
     "port": 5432,

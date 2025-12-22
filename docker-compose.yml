@@ -90,8 +90,8 @@ services:
       - NODE_ENV=development
       - PORT=8000
       - MEDPLUM_BASE_URL=http://medplum:3000
-      - MEDPLUM_CLIENT_ID=3bede64f-dcd5-4abb-9242-e87c1ae54e9d
-      - MEDPLUM_CLIENT_SECRET=713c1b838b4bd808f5d20c0c127529c016cf447b2ae179209bf1212bcf9f2c18
+      - MEDPLUM_CLIENT_ID=af1e9511-2fc6-4b12-b66e-594b58a7f096
+      - MEDPLUM_CLIENT_SECRET=9e867f4e0839d8432d126b23ac85ef087c1e225c031eab449036df95bcd96b70
       - USE_MOCKS=true
       - CORS_ORIGIN=http://localhost:4000
     healthcheck:

@@ -52,6 +52,30 @@ export interface SyncResult {
 // Re-export FHIR types for convenience
 export type { Patient, Encounter, Observation, Condition, DiagnosticReport };
 
+// Subscription types
+export interface SubscriptionEvent {
+  id: string;
+  subscriptionId: string;
+  timestamp: string;
+  resourceType: string;
+  resourceId: string;
+  action: 'create' | 'update' | 'delete';
+  status: 'delivered' | 'failed' | 'pending';
+}
+
+// Bot types
+export interface BotExecution {
+  id: string;
+  botId: string;
+  botName?: string;
+  timestamp: string;
+  status: 'success' | 'error';
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  duration?: number;
+}
+
 // EHR-specific patient format (before FHIR transformation)
 export interface EhrPatient {
   id: string;

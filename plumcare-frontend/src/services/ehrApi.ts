@@ -263,6 +263,323 @@ export async function syncMockData(options?: MockDataSyncRequest): Promise<MockD
   return response.json();
 }
 
+// ============================================
+// SUBSCRIPTIONS API
+// ============================================
+
+export interface SubscriptionConfig {
+  name: string;
+  criteria: string;
+  interaction?: 'create' | 'update' | 'delete';
+  endpoint?: string;
+  fhirPathFilter?: string;
+  maxAttempts?: number;
+}
+
+export interface Subscription {
+  resourceType: 'Subscription';
+  id?: string;
+  status: 'requested' | 'active' | 'error' | 'off';
+  reason?: string;
+  criteria: string;
+  channel: {
+    type: string;
+    endpoint?: string;
+    payload?: string;
+  };
+  extension?: Array<{
+    url: string;
+    valueCode?: string;
+    valueInteger?: number;
+    valueString?: string;
+  }>;
+  meta?: {
+    lastUpdated?: string;
+  };
+}
+
+/**
+ * Get all subscriptions
+ */
+export async function getSubscriptions(): Promise<Subscription[]> {
+  const response = await fetch(`${API_BASE_URL}/api/subscriptions`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch subscriptions');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Create a new subscription
+ */
+export async function createSubscription(config: SubscriptionConfig): Promise<Subscription> {
+  const response = await fetch(`${API_BASE_URL}/api/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create subscription');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Create default subscriptions
+ */
+export async function createDefaultSubscriptions(): Promise<Subscription[]> {
+  const response = await fetch(`${API_BASE_URL}/api/subscriptions/defaults`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create default subscriptions');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Pause a subscription
+ */
+export async function pauseSubscription(id: string): Promise<Subscription> {
+  const response = await fetch(`${API_BASE_URL}/api/subscriptions/${id}/pause`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to pause subscription');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Resume a subscription
+ */
+export async function resumeSubscription(id: string): Promise<Subscription> {
+  const response = await fetch(`${API_BASE_URL}/api/subscriptions/${id}/resume`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to resume subscription');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Delete a subscription
+ */
+export async function deleteSubscription(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/subscriptions/${id}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to delete subscription');
+  }
+}
+
+// ============================================
+// BOTS API
+// ============================================
+
+export interface BotConfig {
+  name: string;
+  description?: string;
+  code: string;
+  runtimeVersion?: 'awslambda' | 'vmcontext';
+}
+
+export interface Bot {
+  resourceType: 'Bot';
+  id?: string;
+  name?: string;
+  description?: string;
+  runtimeVersion?: string;
+  meta?: {
+    lastUpdated?: string;
+  };
+}
+
+export interface BotTemplate {
+  name: string;
+  description: string;
+  key: string;
+}
+
+export interface BotExecution {
+  id: string;
+  botId: string;
+  timestamp: string;
+  status: 'success' | 'error';
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  duration?: number;
+}
+
+/**
+ * Get all bots
+ */
+export async function getBots(): Promise<Bot[]> {
+  const response = await fetch(`${API_BASE_URL}/api/bots`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch bots');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get bot templates
+ */
+export async function getBotTemplates(): Promise<BotTemplate[]> {
+  const response = await fetch(`${API_BASE_URL}/api/bots/templates`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch bot templates');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get bot template code
+ */
+export async function getBotTemplateCode(key: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/api/bots/templates/${key}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch bot template code');
+  }
+  const data = await response.json();
+  return data.data.code;
+}
+
+/**
+ * Create a new bot
+ */
+export async function createBot(config: BotConfig): Promise<Bot> {
+  const response = await fetch(`${API_BASE_URL}/api/bots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create bot');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Create bot from template
+ */
+export async function createBotFromTemplate(
+  name: string,
+  templateKey: string,
+  description?: string
+): Promise<Bot> {
+  const response = await fetch(`${API_BASE_URL}/api/bots/from-template`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, templateKey, description }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create bot from template');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Execute a bot
+ */
+export async function executeBot(botId: string, input?: unknown): Promise<unknown> {
+  const response = await fetch(`${API_BASE_URL}/api/bots/${botId}/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to execute bot');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Delete a bot
+ */
+export async function deleteBot(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/bots/${id}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to delete bot');
+  }
+}
+
+/**
+ * Create a subscription for a bot
+ */
+export async function createBotSubscription(
+  botId: string,
+  criteria: string,
+  interaction?: 'create' | 'update' | 'delete'
+): Promise<Subscription> {
+  const response = await fetch(`${API_BASE_URL}/api/bots/${botId}/subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ criteria, interaction }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create bot subscription');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+/**
+ * Get bot executions
+ */
+export async function getBotExecutions(botId?: string, limit = 20): Promise<BotExecution[]> {
+  const url = botId
+    ? `${API_BASE_URL}/api/bots/${botId}/executions?limit=${limit}`
+    : `${API_BASE_URL}/api/bots/executions?limit=${limit}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error('Failed to fetch bot executions');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
+// ============================================
+// WEBHOOKS API
+// ============================================
+
+export interface WebhookEvent {
+  id: string;
+  timestamp: string;
+  resourceType: string;
+  resourceId: string;
+  action: 'create' | 'update' | 'delete';
+  subscriptionId?: string;
+  processed: boolean;
+}
+
+/**
+ * Get recent webhook events
+ */
+export async function getWebhookEvents(limit = 20): Promise<WebhookEvent[]> {
+  const response = await fetch(`${API_BASE_URL}/api/webhooks/events?limit=${limit}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch webhook events');
+  }
+  const data = await response.json();
+  return data.data;
+}
+
 // EHR System metadata (static, doesn't need API call)
 export const ehrSystemMeta: Record<EhrSystem, { name: string; color: string; logo: string; description: string }> = {
   athena: {

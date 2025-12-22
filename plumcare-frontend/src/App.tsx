@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { PlumCareShell } from './components/shell/PlumCareShell';
 import './index.css';
+import { AutomationPage } from './pages/automation/AutomationPage';
 import { EhrIntegrationsPage } from './pages/ehr-integrations/EhrIntegrationsPage';
 import { HomePage } from './pages/home/HomePage';
 import { LoadingPage } from './pages/LoadingPage';
@@ -55,6 +56,7 @@ export function App(): JSX.Element | null {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/ehr-integrations" element={<EhrIntegrationsPage />} />
+          <Route path="/automation" element={<AutomationPage />} />
           <Route path="/patients" element={<PatientsPage />} />
           <Route path="/patients/:patientId" element={<PatientsPage />} />
           <Route path="/new-patient" element={<NewPatientPage />} />

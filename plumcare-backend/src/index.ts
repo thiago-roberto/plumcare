@@ -9,7 +9,8 @@ const app = express();
 
 // Middleware
 app.use(cors(config.cors));
-app.use(express.json());
+// Parse JSON bodies - include FHIR content types for Medplum webhooks
+app.use(express.json({ type: ['application/json', 'application/fhir+json'] }));
 
 // Health check
 app.get('/health', (_req, res) => {
