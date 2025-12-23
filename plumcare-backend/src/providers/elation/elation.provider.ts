@@ -12,7 +12,7 @@ import type {
   Observation,
   Condition,
   DiagnosticReport,
-} from '../../types/index.js';
+} from '../../core/types/index.js';
 
 /**
  * Real Elation Health API Provider
