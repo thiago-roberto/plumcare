@@ -8,7 +8,7 @@ import type {
   Observation,
   Condition,
   DiagnosticReport,
-} from '../core/types/index.js';
+} from '../types/index.js';
 
 export interface AuthResult {
   accessToken: string;

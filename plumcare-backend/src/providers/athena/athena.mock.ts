@@ -12,7 +12,7 @@ import type {
   EhrEncounter,
   PaginationParams,
   PaginatedResponse,
-} from '../../core/types/index.js';
+} from '../../types/index.js';
 import {
   generateCompleteAthenaPatient,
   type AthenaPatient,
