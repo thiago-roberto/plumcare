@@ -226,8 +226,8 @@ export function EhrIntegrationsPage(): JSX.Element {
       setSyncHistory(newHistory);
       saveSyncHistory(newHistory);
 
-      // Refresh stats after sync
-      await fetchStats();
+      // Refresh stats after sync (pass true to invalidate cache)
+      await fetchStats(true);
     } catch (err) {
       setSyncResult({
         success: false,

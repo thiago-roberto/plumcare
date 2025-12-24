@@ -4,10 +4,13 @@
   "private": true,
   "workspaces": [
     "plumcare-frontend",
+    "plumcare-backend",
     "shared"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=plumcare-frontend",
+    "dev": "concurrently -n fe,be -c cyan,green \"npm run dev:fe\" \"npm run dev:be\"",
+    "dev:fe": "npm run dev --workspace=plumcare-frontend",
+    "dev:be": "npm run dev --workspace=plumcare-backend",
     "dev:docker": "docker compose up",
     "dev:db": "docker compose up postgres",
     "dev:redis": "docker compose up redis",
@@ -22,5 +25,8 @@
   },
   "engines": {
     "node": "^22.18.0 || >=24.2.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

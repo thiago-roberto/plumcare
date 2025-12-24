@@ -37,7 +37,7 @@ interface PaginatedResponse<T> {
 }
 
 // Base URL for the backend API
-const API_BASE_URL = import.meta.env.VITE_EHR_API_URL || 'http://localhost:8000';
+const API_BASE_URL = (import.meta.env.VITE_EHR_SYNC_URL || 'http://localhost:8000').replace(/\/$/, '');
 
 /**
  * Fetch all EHR connections with their status
