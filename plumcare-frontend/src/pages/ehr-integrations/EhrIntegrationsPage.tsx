@@ -20,6 +20,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import type { Patient, Encounter } from '@medplum/fhirtypes';
 import { useMedplum } from '@medplum/react';
 import {
@@ -31,7 +32,11 @@ import {
   IconPlugConnected,
   IconRefresh,
   IconUsers,
+  IconRobot,
+  IconStethoscope,
+  IconTestPipe,
 } from '@tabler/icons-react';
+import React from 'react';
 import type { JSX } from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import {
@@ -202,6 +207,49 @@ export function EhrIntegrationsPage(): JSX.Element {
     fetchStats();
   }, [fetchStats]);
 
+  // Show bot trigger notifications
+  const showBotNotifications = (result: MockDataSyncResponse) => {
+    const totalEncounters =
+      result.summary.athena.encounters +
+      result.summary.elation.encounters +
+      result.summary.nextgen.encounters;
+
+    const totalObservations =
+      result.summary.athena.observations +
+      result.summary.elation.observations +
+      result.summary.nextgen.observations;
+
+    // Simulate Encounter Notification Bot trigger
+    if (totalEncounters > 0) {
+      setTimeout(() => {
+        notifications.show({
+          id: 'encounter-bot',
+          title: 'Encounter Notification Bot',
+          message: `Triggered for ${totalEncounters} new encounter${totalEncounters > 1 ? 's' : ''}. Care team notified.`,
+          color: 'violet',
+          icon: React.createElement(IconStethoscope, { size: 18 }),
+          autoClose: 5000,
+        });
+      }, 800);
+    }
+
+    // Simulate Lab Result Alert Bot trigger
+    if (totalObservations > 0) {
+      // Show a notification for "abnormal" results (simulated - ~20% of observations)
+      const abnormalCount = Math.max(1, Math.floor(totalObservations * 0.2));
+      setTimeout(() => {
+        notifications.show({
+          id: 'lab-alert-bot',
+          title: 'Lab Result Alert Bot',
+          message: `Analyzed ${totalObservations} vital signs. ${abnormalCount} abnormal result${abnormalCount > 1 ? 's' : ''} flagged for review.`,
+          color: 'orange',
+          icon: React.createElement(IconTestPipe, { size: 18 }),
+          autoClose: 6000,
+        });
+      }, 1500);
+    }
+  };
+
   // Handle mock data sync
   const handleSyncMockData = async () => {
     try {
@@ -228,6 +276,11 @@ export function EhrIntegrationsPage(): JSX.Element {
 
       // Refresh stats after sync (pass true to invalidate cache)
       await fetchStats(true);
+
+      // Show bot trigger notifications (simulates bots responding to sync)
+      if (result.success) {
+        showBotNotifications(result);
+      }
     } catch (err) {
       setSyncResult({
         success: false,

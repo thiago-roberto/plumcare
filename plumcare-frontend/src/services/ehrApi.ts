@@ -565,6 +565,7 @@ export interface WebhookEvent {
   resourceId: string;
   action: 'create' | 'update' | 'delete';
   subscriptionId?: string;
+  payload?: Record<string, unknown>;
   processed: boolean;
 }
 

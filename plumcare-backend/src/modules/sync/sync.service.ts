@@ -1,11 +1,12 @@
 import { injectable, inject } from 'inversify';
 import type { Repository } from 'typeorm';
-import type { Patient, Encounter, Observation, Condition } from '@medplum/fhirtypes';
+import type { Patient, Encounter, Observation, Condition, Resource } from '@medplum/fhirtypes';
 import { TYPES } from '../../core/di-tokens.js';
 import type { EhrSystem, EhrPatient, EhrEncounter } from '../../core/types/index.js';
 import { getProvider, getRegisteredSystems, type ProviderConfig } from '../../core/providers/base.provider.js';
 import { ConfigService } from '../config/config.service.js';
 import { MedplumService } from '../medplum/medplum.service.js';
+import { WebhooksService } from '../webhooks/webhooks.service.js';
 import { SyncEvent } from '../../database/entities/sync-event.entity.js';
 
 // EHR source system tag URL - must match frontend's EHR_SOURCE_SYSTEM
@@ -43,6 +44,7 @@ export class SyncService {
   constructor(
     @inject(TYPES.ConfigService) private configService: ConfigService,
     @inject(TYPES.MedplumService) private medplumService: MedplumService,
+    @inject(TYPES.WebhooksService) private webhooksService: WebhooksService,
     @inject(TYPES.SyncEventRepository) private syncEventRepository: Repository<SyncEvent>
   ) {}
 
@@ -160,9 +162,11 @@ export class SyncService {
         // Batch upsert patients first (other resources reference them)
         if (fhirPatients.length > 0) {
           await this.medplumService.batchUpsertResources(fhirPatients);
+          await this.logWebhookEventsForResources(fhirPatients);
         }
         if (fhirEncounters.length > 0) {
           await this.medplumService.batchUpsertResources(fhirEncounters);
+          await this.logWebhookEventsForResources(fhirEncounters);
         }
 
         const systemSummary = summary[system as keyof typeof summary];
@@ -183,9 +187,11 @@ export class SyncService {
         // Batch upsert observations and conditions
         if (allObservations.length > 0) {
           await this.medplumService.batchUpsertResources(allObservations);
+          await this.logWebhookEventsForResources(allObservations as Resource[]);
         }
         if (allConditions.length > 0) {
           await this.medplumService.batchUpsertResources(allConditions);
+          await this.logWebhookEventsForResources(allConditions as Resource[]);
         }
 
         systemSummary.observations = allObservations.length;
@@ -250,7 +256,7 @@ export class SyncService {
       address: ehrPatient.address
         ? [
             {
-              line: [ehrPatient.address.street],
+              line: ehrPatient.address.street ? [ehrPatient.address.street] : undefined,
               city: ehrPatient.address.city,
               state: ehrPatient.address.state,
               postalCode: ehrPatient.address.postalCode,
@@ -349,5 +355,97 @@ export class SyncService {
       medications: 0,
       diagnosticReports: 0,
     };
+  }
+
+  /**
+   * Log webhook events for synced resources
+   * This simulates webhook events that would occur in a real EHR integration
+   */
+  private async logWebhookEventsForResources(resources: Resource[]): Promise<void> {
+    if (resources.length === 0) return;
+
+    const events = resources.map(resource => {
+      const payload = this.extractResourceDetails(resource);
+
+      return {
+        resourceType: resource.resourceType,
+        resourceId: String(payload.resourceId),
+        action: 'create' as const,
+        payload,
+      };
+    });
+
+    await this.webhooksService.logSyncEventsBatch(events);
+  }
+
+  /**
+   * Extract detailed information from a FHIR resource for webhook logging
+   */
+  private extractResourceDetails(resource: Resource): Record<string, unknown> {
+    // Get common fields
+    const resourceWithIdentifier = resource as { identifier?: Array<{ value?: string; system?: string }> };
+    const identifier = resourceWithIdentifier.identifier?.[0];
+    const ehrSource = resource.meta?.tag?.find(t => t.system === EHR_SOURCE_SYSTEM);
+
+    const baseDetails: Record<string, unknown> = {
+      resourceType: resource.resourceType,
+      resourceId: identifier?.value || resource.id || 'unknown',
+      ehrSystem: ehrSource?.code || 'unknown',
+      ehrSystemDisplay: ehrSource?.display || 'Unknown System',
+    };
+
+    // Extract type-specific details
+    switch (resource.resourceType) {
+      case 'Patient': {
+        const patient = resource as Patient;
+        const name = patient.name?.[0];
+        return {
+          ...baseDetails,
+          patientName: name ? `${name.given?.join(' ') || ''} ${name.family || ''}`.trim() : 'Unknown',
+          gender: patient.gender,
+          birthDate: patient.birthDate,
+          mrn: identifier?.value,
+        };
+      }
+      case 'Encounter': {
+        const encounter = resource as Encounter;
+        return {
+          ...baseDetails,
+          status: encounter.status,
+          type: encounter.type?.[0]?.text,
+          reason: encounter.reasonCode?.[0]?.text,
+          patientReference: encounter.subject?.reference,
+          period: encounter.period,
+        };
+      }
+      case 'Observation': {
+        const observation = resource as Observation;
+        return {
+          ...baseDetails,
+          status: observation.status,
+          category: observation.category?.[0]?.coding?.[0]?.display || observation.category?.[0]?.coding?.[0]?.code,
+          code: observation.code?.text || observation.code?.coding?.[0]?.display,
+          loincCode: observation.code?.coding?.[0]?.code,
+          value: observation.valueQuantity
+            ? `${observation.valueQuantity.value} ${observation.valueQuantity.unit}`
+            : observation.valueString,
+          patientReference: observation.subject?.reference,
+          effectiveDateTime: observation.effectiveDateTime,
+        };
+      }
+      case 'Condition': {
+        const condition = resource as Condition;
+        return {
+          ...baseDetails,
+          clinicalStatus: condition.clinicalStatus?.coding?.[0]?.code,
+          code: condition.code?.text || condition.code?.coding?.[0]?.display,
+          icdCode: condition.code?.coding?.[0]?.code,
+          patientReference: condition.subject?.reference,
+          onsetDateTime: condition.onsetDateTime,
+        };
+      }
+      default:
+        return baseDetails;
+    }
   }
 }

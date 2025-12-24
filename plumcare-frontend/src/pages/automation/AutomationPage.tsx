@@ -636,35 +636,83 @@ export function AutomationPage(): JSX.Element {
                   </Center>
                 </Paper>
               ) : (
-                <ScrollArea h={400}>
+                <ScrollArea h={500}>
                   <Stack gap="xs">
-                    {webhookEvents.map((event) => (
-                      <Paper key={event.id} p="sm" withBorder radius="sm">
-                        <Group justify="space-between">
-                          <Group gap="sm">
-                            <ThemeIcon
-                              size="sm"
-                              color={event.processed ? 'teal' : 'orange'}
-                              variant="light"
-                            >
-                              {event.processed ? <IconCheck size={14} /> : <IconWebhook size={14} />}
-                            </ThemeIcon>
-                            <div>
-                              <Group gap="xs">
-                                <Badge size="xs" variant="outline">{event.resourceType}</Badge>
-                                <Badge size="xs" color="blue" variant="light">{event.action}</Badge>
-                              </Group>
-                              <Text size="xs" c="dimmed" mt={2}>
-                                {event.resourceId}
-                              </Text>
-                            </div>
+                    {webhookEvents.map((event) => {
+                      const payload = event.payload as Record<string, unknown> | undefined;
+                      const ehrSystem = payload?.ehrSystem as string | undefined;
+                      const ehrSystemDisplay = payload?.ehrSystemDisplay as string | undefined;
+                      const patientName = payload?.patientName as string | undefined;
+                      const patientReference = payload?.patientReference as string | undefined;
+                      const value = payload?.value as string | undefined;
+                      const code = payload?.code as string | undefined;
+                      const clinicalStatus = payload?.clinicalStatus as string | undefined;
+
+                      // Build description based on resource type
+                      let description = '';
+                      if (event.resourceType === 'Patient' && patientName) {
+                        description = patientName;
+                      } else if (event.resourceType === 'Observation' && code) {
+                        description = value ? `${code}: ${value}` : code;
+                      } else if (event.resourceType === 'Condition' && code) {
+                        description = clinicalStatus ? `${code} (${clinicalStatus})` : code;
+                      } else if (event.resourceType === 'Encounter') {
+                        const encounterType = payload?.type as string | undefined;
+                        description = encounterType || payload?.status as string || '';
+                      }
+
+                      return (
+                        <Paper key={event.id} p="sm" withBorder radius="sm">
+                          <Group justify="space-between" align="flex-start">
+                            <Group gap="sm" align="flex-start">
+                              <ThemeIcon
+                                size="sm"
+                                color={event.processed ? 'teal' : 'orange'}
+                                variant="light"
+                                mt={2}
+                              >
+                                {event.processed ? <IconCheck size={14} /> : <IconWebhook size={14} />}
+                              </ThemeIcon>
+                              <div>
+                                <Group gap="xs" mb={4}>
+                                  <Badge size="xs" variant="outline" color="orange">{event.resourceType}</Badge>
+                                  <Badge size="xs" color="blue" variant="light">{event.action}</Badge>
+                                  {ehrSystem && (
+                                    <Badge
+                                      size="xs"
+                                      variant="light"
+                                      color={
+                                        ehrSystem === 'athena' ? 'teal' :
+                                        ehrSystem === 'elation' ? 'violet' :
+                                        ehrSystem === 'nextgen' ? 'indigo' : 'gray'
+                                      }
+                                    >
+                                      {ehrSystemDisplay || ehrSystem}
+                                    </Badge>
+                                  )}
+                                </Group>
+                                {description && (
+                                  <Text size="sm" fw={500} mb={2}>
+                                    {description}
+                                  </Text>
+                                )}
+                                <Text size="xs" c="dimmed">
+                                  ID: {event.resourceId}
+                                </Text>
+                                {patientReference && event.resourceType !== 'Patient' && (
+                                  <Text size="xs" c="dimmed">
+                                    Patient: {patientReference.replace('Patient/', '')}
+                                  </Text>
+                                )}
+                              </div>
+                            </Group>
+                            <Text size="xs" c="dimmed">
+                              {formatTimeAgo(event.timestamp)}
+                            </Text>
                           </Group>
-                          <Text size="xs" c="dimmed">
-                            {formatTimeAgo(event.timestamp)}
-                          </Text>
-                        </Group>
-                      </Paper>
-                    ))}
+                        </Paper>
+                      );
+                    })}
                   </Stack>
                 </ScrollArea>
               )}

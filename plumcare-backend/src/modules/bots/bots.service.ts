@@ -99,16 +99,22 @@ export class BotsService {
       name: config.name,
       description: config.description,
       runtimeVersion: config.runtimeVersion || 'vmcontext',
+      code: config.code, // Store code directly on the bot resource
     };
 
     const createdBot = await this.medplumService.client.createResource(bot);
 
-    // Deploy the bot code
-    if (createdBot.id) {
-      await this.medplumService.client.post(
-        this.medplumService.client.fhirUrl('Bot', createdBot.id, '$deploy'),
-        { code: config.code }
-      );
+    // Try to deploy the bot code (non-blocking - some Medplum setups don't support $deploy)
+    if (createdBot.id && config.code) {
+      try {
+        await this.medplumService.client.post(
+          this.medplumService.client.fhirUrl('Bot', createdBot.id, '$deploy'),
+          { code: config.code }
+        );
+      } catch (deployError) {
+        // Log but don't fail - bot is created, deployment is optional
+        console.warn(`Bot ${createdBot.id} created but deploy failed:`, deployError);
+      }
     }
 
     return createdBot;

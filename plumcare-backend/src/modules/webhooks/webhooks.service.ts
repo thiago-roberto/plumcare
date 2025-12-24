@@ -145,4 +145,53 @@ export class WebhooksService {
       return null;
     }
   }
+
+  /**
+   * Log a simulated webhook event (useful for mock data sync)
+   */
+  async logSyncEvent(params: {
+    resourceType: string;
+    resourceId: string;
+    action: 'create' | 'update' | 'delete';
+    payload?: Record<string, unknown>;
+  }): Promise<WebhookEvent | null> {
+    try {
+      const event = this.webhookEventRepository.create({
+        resourceType: params.resourceType,
+        resourceId: params.resourceId,
+        action: params.action,
+        subscriptionId: 'mock-sync',
+        payload: params.payload || { resourceType: params.resourceType, id: params.resourceId },
+        processed: true, // Mark as processed since it's from sync
+      });
+      return this.webhookEventRepository.save(event);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Log multiple sync events in batch
+   */
+  async logSyncEventsBatch(events: Array<{
+    resourceType: string;
+    resourceId: string;
+    action: 'create' | 'update' | 'delete';
+    payload?: Record<string, unknown>;
+  }>): Promise<number> {
+    try {
+      const entities = events.map(e => this.webhookEventRepository.create({
+        resourceType: e.resourceType,
+        resourceId: e.resourceId,
+        action: e.action,
+        subscriptionId: 'mock-sync',
+        payload: e.payload || { resourceType: e.resourceType, id: e.resourceId },
+        processed: true,
+      }));
+      await this.webhookEventRepository.save(entities);
+      return entities.length;
+    } catch {
+      return 0;
+    }
+  }
 }
