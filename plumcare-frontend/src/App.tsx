@@ -9,6 +9,7 @@ import { EhrIntegrationsPage } from './pages/ehr-integrations/EhrIntegrationsPag
 import { HomePage } from './pages/home/HomePage';
 import { LoadingPage } from './pages/LoadingPage';
 import { NewPatientPage } from './pages/patients/NewPatientPage';
+import { PatientProfilePage } from './pages/patients/PatientProfilePage';
 import { PatientsPage } from './pages/patients/PatientsPage';
 import { SignInPage } from './pages/SignInPage';
 
@@ -58,7 +59,7 @@ export function App(): JSX.Element | null {
           <Route path="/ehr-integrations" element={<EhrIntegrationsPage />} />
           <Route path="/automation" element={<AutomationPage />} />
           <Route path="/patients" element={<PatientsPage />} />
-          <Route path="/patients/:patientId" element={<PatientsPage />} />
+          <Route path="/patients/:patientId" element={<PatientProfilePage />} />
           <Route path="/new-patient" element={<NewPatientPage />} />
           <Route path="/signin" element={<Navigate to="/loading" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

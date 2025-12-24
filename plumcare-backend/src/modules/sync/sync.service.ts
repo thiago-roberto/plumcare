@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
 import type { Repository } from 'typeorm';
-import type { Patient, Encounter, Observation, Condition, Resource } from '@medplum/fhirtypes';
+import type { Patient, Encounter, Observation, Condition, Resource, ServiceRequest } from '@medplum/fhirtypes';
 import { TYPES } from '../../core/di-tokens.js';
 import type { EhrSystem, EhrPatient, EhrEncounter } from '../../core/types/index.js';
 import { getProvider, getRegisteredSystems, type ProviderConfig } from '../../core/providers/base.provider.js';
@@ -37,6 +37,7 @@ interface ResourceSummary {
   allergies: number;
   medications: number;
   diagnosticReports: number;
+  serviceRequests: number;
 }
 
 @injectable()
@@ -159,19 +160,45 @@ export class SyncService {
         const fhirPatients = patientsResult.data.map(p => this.convertToFhirPatient(p, system));
         const fhirEncounters = encountersResult.data.map(e => this.convertToFhirEncounter(e, system));
 
-        // Batch upsert patients first (other resources reference them)
+        // Batch upsert patients first and build a mapping from EHR ID to Medplum ID
+        const ehrToMedplumPatientMap = new Map<string, string>();
+
         if (fhirPatients.length > 0) {
-          await this.medplumService.batchUpsertResources(fhirPatients);
+          const patientBundle = await this.medplumService.batchUpsertResources(fhirPatients);
           await this.logWebhookEventsForResources(fhirPatients);
+
+          // Build mapping from EHR patient ID to Medplum patient ID
+          patientBundle.entry?.forEach((entry, index) => {
+            const medplumId = entry.resource?.id || entry.response?.location?.split('/').pop()?.split('?')[0];
+            if (medplumId && patientsResult.data[index]) {
+              const ehrPatientId = `${system}-p-${patientsResult.data[index].sourceId}`;
+              ehrToMedplumPatientMap.set(ehrPatientId, medplumId);
+              // Also map the direct reference format
+              ehrToMedplumPatientMap.set(`Patient/${ehrPatientId}`, `Patient/${medplumId}`);
+            }
+          });
         }
-        if (fhirEncounters.length > 0) {
-          await this.medplumService.batchUpsertResources(fhirEncounters);
-          await this.logWebhookEventsForResources(fhirEncounters);
+
+        // Update encounter patient references to use Medplum IDs
+        const updatedEncounters = fhirEncounters.map(encounter => {
+          const ehrRef = encounter.subject?.reference;
+          if (ehrRef && ehrToMedplumPatientMap.has(ehrRef)) {
+            return {
+              ...encounter,
+              subject: { reference: ehrToMedplumPatientMap.get(ehrRef) },
+            };
+          }
+          return encounter;
+        });
+
+        if (updatedEncounters.length > 0) {
+          await this.medplumService.batchUpsertResources(updatedEncounters);
+          await this.logWebhookEventsForResources(updatedEncounters);
         }
 
         const systemSummary = summary[system as keyof typeof summary];
         systemSummary.patients = fhirPatients.length;
-        systemSummary.encounters = fhirEncounters.length;
+        systemSummary.encounters = updatedEncounters.length;
 
         // Get clinical data in parallel for all patients
         const patientIds = patientsResult.data.map(p => `${system}-p-${p.sourceId}`);
@@ -184,21 +211,72 @@ export class SyncService {
         const allObservations = observationsResults.flatMap(r => r.data);
         const allConditions = conditionsResults.flatMap(r => r.data);
 
-        // Batch upsert observations and conditions
-        if (allObservations.length > 0) {
-          await this.medplumService.batchUpsertResources(allObservations);
-          await this.logWebhookEventsForResources(allObservations as Resource[]);
+        // Update observation patient references to use Medplum IDs
+        const updatedObservations = allObservations.map(obs => {
+          const ehrRef = obs.subject?.reference;
+          if (ehrRef && ehrToMedplumPatientMap.has(ehrRef)) {
+            return {
+              ...obs,
+              subject: { reference: ehrToMedplumPatientMap.get(ehrRef) },
+            };
+          }
+          return obs;
+        });
+
+        // Update condition patient references to use Medplum IDs
+        const updatedConditions = allConditions.map(cond => {
+          const ehrRef = cond.subject?.reference;
+          if (ehrRef && ehrToMedplumPatientMap.has(ehrRef)) {
+            return {
+              ...cond,
+              subject: { reference: ehrToMedplumPatientMap.get(ehrRef) },
+            };
+          }
+          return cond;
+        });
+
+        // Batch upsert observations and conditions with corrected references
+        if (updatedObservations.length > 0) {
+          await this.medplumService.batchUpsertResources(updatedObservations);
+          await this.logWebhookEventsForResources(updatedObservations as Resource[]);
         }
-        if (allConditions.length > 0) {
-          await this.medplumService.batchUpsertResources(allConditions);
-          await this.logWebhookEventsForResources(allConditions as Resource[]);
+        if (updatedConditions.length > 0) {
+          await this.medplumService.batchUpsertResources(updatedConditions);
+          await this.logWebhookEventsForResources(updatedConditions as Resource[]);
         }
 
-        systemSummary.observations = allObservations.length;
-        systemSummary.conditions = allConditions.length;
+        systemSummary.observations = updatedObservations.length;
+        systemSummary.conditions = updatedConditions.length;
+
+        // Sync lab orders as ServiceRequests (Elation and NextGen have native lab orders)
+        if ('getNativeLabOrders' in provider && typeof provider.getNativeLabOrders === 'function') {
+          const labOrdersResult = await (provider as { getNativeLabOrders: (params?: { limit?: number }) => Promise<{ data: unknown[] }> }).getNativeLabOrders({ limit: patientCount * 5 });
+          const serviceRequests = labOrdersResult.data.map((labOrder: unknown) =>
+            this.convertLabOrderToServiceRequest(labOrder, system, patientsResult.data)
+          );
+
+          // Update ServiceRequest patient references to use Medplum IDs
+          const updatedServiceRequests = serviceRequests.map(sr => {
+            const ehrRef = sr.subject?.reference;
+            if (ehrRef && ehrToMedplumPatientMap.has(ehrRef)) {
+              return {
+                ...sr,
+                subject: { reference: ehrToMedplumPatientMap.get(ehrRef) },
+              };
+            }
+            return sr;
+          });
+
+          if (updatedServiceRequests.length > 0) {
+            await this.medplumService.batchUpsertResources(updatedServiceRequests);
+            await this.logWebhookEventsForResources(updatedServiceRequests as Resource[]);
+          }
+          systemSummary.serviceRequests = updatedServiceRequests.length;
+        }
 
         totalResources += systemSummary.patients + systemSummary.encounters +
-                         systemSummary.observations + systemSummary.conditions;
+                         systemSummary.observations + systemSummary.conditions +
+                         systemSummary.serviceRequests;
 
         await this.logSyncEvent({
           system,
@@ -206,7 +284,7 @@ export class SyncService {
           action: 'created',
           resourceId: 'mock-batch',
           status: 'success',
-          details: `Mock sync: ${systemSummary.patients} patients, ${systemSummary.encounters} encounters, ${systemSummary.observations} observations, ${systemSummary.conditions} conditions`,
+          details: `Mock sync: ${systemSummary.patients} patients, ${systemSummary.encounters} encounters, ${systemSummary.observations} observations, ${systemSummary.conditions} conditions, ${systemSummary.serviceRequests} lab orders`,
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -324,6 +402,140 @@ export class SyncService {
     return names[system];
   }
 
+  private convertLabOrderToServiceRequest(
+    labOrder: unknown,
+    system: EhrSystem,
+    patients: EhrPatient[]
+  ): ServiceRequest {
+    // Handle both Elation and NextGen lab order formats
+    // Elation uses: id (number), patient (number), status, priority, lab_name, tests
+    // NextGen uses: order_id (string), person_id (string), order_status, priority, performing_lab_name, order_tests
+    const order = labOrder as {
+      // Elation fields
+      id?: number;
+      patient?: number;
+      status?: string;
+      lab_name?: string;
+      tests?: Array<{ code: string; name: string; loinc_code?: string }>;
+      notes?: string;
+      // NextGen fields
+      order_id?: string;
+      person_id?: string;
+      order_status?: string;
+      performing_lab_name?: string;
+      order_tests?: Array<{ test_code: string; test_name: string; loinc_code?: string }>;
+      special_instructions?: string;
+      // Shared fields
+      order_date?: string;
+      priority: string;
+    };
+
+    // Get ID - Elation uses numeric id, NextGen uses order_id string
+    const orderId = order.id?.toString() || order.order_id || 'unknown';
+
+    // Get patient ID - Elation uses patient (number), NextGen uses person_id (string)
+    const patientId = order.patient?.toString() || order.person_id || '';
+
+    // Find the patient to get the correct EHR patient ID format
+    const patientData = patients.find(p => p.sourceId === patientId);
+    const patientRef = patientData ? `Patient/${system}-p-${patientData.sourceId}` : `Patient/${system}-p-${patientId}`;
+
+    // Map status to FHIR ServiceRequest status
+    const statusMap: Record<string, ServiceRequest['status']> = {
+      'Ordered': 'active',
+      'Collected': 'active',
+      'In Progress': 'active',
+      'Final': 'completed',
+      'Cancelled': 'revoked',
+      'Pending': 'draft',
+      'Completed': 'completed',
+    };
+
+    // Map priority to FHIR request priority
+    const priorityMap: Record<string, ServiceRequest['priority']> = {
+      'Routine': 'routine',
+      'Urgent': 'urgent',
+      'STAT': 'stat',
+      'Normal': 'routine',
+      'High': 'urgent',
+    };
+
+    const orderDate = order.order_date;
+    const labName = order.lab_name || order.performing_lab_name;
+    const status = order.status || order.order_status || 'active';
+    const notes = order.notes || order.special_instructions;
+
+    // Handle tests from both Elation (tests) and NextGen (order_tests)
+    const elationTests = order.tests || [];
+    const nextgenTests = order.order_tests || [];
+
+    // Build code coding array from available tests
+    const codeCoding = elationTests.length > 0
+      ? elationTests.map(test => ({
+          system: 'http://loinc.org',
+          code: test.loinc_code || test.code,
+          display: test.name,
+        }))
+      : nextgenTests.map(test => ({
+          system: 'http://loinc.org',
+          code: test.loinc_code || test.test_code,
+          display: test.test_name,
+        }));
+
+    const codeText = elationTests.length > 0
+      ? elationTests.map(t => t.name).join(', ')
+      : nextgenTests.map(t => t.test_name).join(', ');
+
+    return {
+      resourceType: 'ServiceRequest',
+      identifier: [
+        {
+          system: `http://plumcare.io/${system}/service-request`,
+          value: orderId,
+        },
+      ],
+      meta: {
+        tag: [
+          {
+            system: EHR_SOURCE_SYSTEM,
+            code: system,
+            display: this.getSystemName(system),
+          },
+        ],
+      },
+      status: statusMap[status] || 'active',
+      intent: 'order',
+      priority: priorityMap[order.priority] || 'routine',
+      category: [
+        {
+          coding: [
+            {
+              system: 'http://snomed.info/sct',
+              code: '108252007',
+              display: 'Laboratory procedure',
+            },
+          ],
+        },
+      ],
+      code: {
+        coding: codeCoding,
+        text: codeText || 'Lab Order',
+      },
+      subject: {
+        reference: patientRef,
+      },
+      authoredOn: orderDate,
+      performer: labName
+        ? [
+            {
+              display: labName,
+            },
+          ]
+        : undefined,
+      note: notes ? [{ text: notes }] : undefined,
+    };
+  }
+
   private async logSyncEvent(params: {
     system: EhrSystem;
     type: string;
@@ -354,6 +566,7 @@ export class SyncService {
       allergies: 0,
       medications: 0,
       diagnosticReports: 0,
+      serviceRequests: 0,
     };
   }
 
@@ -442,6 +655,19 @@ export class SyncService {
           icdCode: condition.code?.coding?.[0]?.code,
           patientReference: condition.subject?.reference,
           onsetDateTime: condition.onsetDateTime,
+        };
+      }
+      case 'ServiceRequest': {
+        const serviceRequest = resource as ServiceRequest;
+        return {
+          ...baseDetails,
+          status: serviceRequest.status,
+          intent: serviceRequest.intent,
+          priority: serviceRequest.priority,
+          code: serviceRequest.code?.text || serviceRequest.code?.coding?.[0]?.display,
+          patientReference: serviceRequest.subject?.reference,
+          authoredOn: serviceRequest.authoredOn,
+          performer: serviceRequest.performer?.[0]?.display,
         };
       }
       default:

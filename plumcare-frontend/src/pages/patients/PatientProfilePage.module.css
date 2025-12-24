@@ -1,0 +1,92 @@
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.emptyContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.backButton {
+  color: #666;
+}
+
+.backButton:hover {
+  color: #333;
+  background: #fff8f0;
+}
+
+.headerCard {
+  background: #fff;
+  border-color: #f0ebe0;
+}
+
+.avatar {
+  font-size: 28px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #ff5500 0%, #ff7733 100%);
+}
+
+.patientName {
+  color: #333;
+}
+
+.stat {
+  text-align: center;
+  padding: 0 16px;
+}
+
+.tab {
+  color: #666;
+  font-weight: 500;
+  padding: 12px 20px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.tab:hover {
+  color: #333;
+  background: #fff8f0;
+}
+
+.tab[data-active] {
+  color: #fff;
+  background: #ff5500;
+  font-weight: 600;
+}
+
+.tab[data-active]:hover {
+  background: #e64d00;
+}
+
+.infoCard {
+  background: #fff;
+  border-color: #f0ebe0;
+}
+
+.vitalCard {
+  background: #fffdf7;
+  border: 1px solid #f0ebe0;
+}
+
+.emptyState {
+  background: #fff;
+  border-color: #f0ebe0;
+  text-align: center;
+}
+
+.clickableRow {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.clickableRow:hover {
+  background-color: #fff8f0;
+}
