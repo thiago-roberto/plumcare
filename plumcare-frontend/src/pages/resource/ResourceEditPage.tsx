@@ -7,7 +7,7 @@ import { useMedplum } from '@medplum/react';
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { ResourceFormWithRequiredProfile } from '../../components/ResourceFormWithRequiredProfile';
+import { ResourceFormWithRequiredProfile } from '../../components/forms';
 import { RESOURCE_PROFILE_URLS } from './utils';
 
 export function ResourceEditPage(): JSX.Element | null {

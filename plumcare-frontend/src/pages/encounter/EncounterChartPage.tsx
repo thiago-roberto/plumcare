@@ -3,7 +3,7 @@
 import type { Encounter, Reference } from '@medplum/fhirtypes';
 import type { JSX } from 'react';
 import { Outlet, useParams } from 'react-router';
-import { EncounterChart } from '../../components/encounter/EncounterChart';
+import { EncounterChart } from '../../components/features/encounter';
 import { showErrorNotification } from '../../utils/notifications';
 
 export const EncounterChartPage = (): JSX.Element | null => {

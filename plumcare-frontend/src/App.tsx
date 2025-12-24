@@ -2,7 +2,7 @@ import { Loading, useMedplum, useMedplumProfile } from '@medplum/react';
 import type { JSX } from 'react';
 import { Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { PlumCareShell } from './components/shell/PlumCareShell';
+import { PlumCareShell } from './components/features/shell';
 import './index.css';
 import { AutomationPage } from './pages/automation/AutomationPage';
 import { EhrIntegrationsPage } from './pages/ehr-integrations/EhrIntegrationsPage';

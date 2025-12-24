@@ -5,7 +5,7 @@ import React from 'react';
 import type { JSX } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import classes from '../tasks/TasksPage.module.css';
-import { TaskBoard } from '../../components/tasks/TaskBoard';
+import { TaskBoard } from '../../components/features/tasks';
 
 export function TasksTab(): JSX.Element {
   const { patientId, taskId } = useParams();

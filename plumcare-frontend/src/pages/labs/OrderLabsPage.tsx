@@ -23,9 +23,7 @@ import {
   ValueSetAutocomplete,
 } from '@medplum/react';
 import type { AsyncAutocompleteOption } from '@medplum/react';
-import { PerformingLabInput } from '../../components/PerformingLabInput';
-import { TestMetadataCardInput } from '../../components/TestMetadataCardInput';
-import { CoverageInput } from '../../components/CoverageInput';
+import { PerformingLabInput, TestMetadataCardInput, CoverageInput } from '../../components/forms';
 import { useState, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { useParams } from 'react-router';

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import type { Patient, ProjectMembership } from '@medplum/fhirtypes';
-import { hasDoseSpotIdentifier } from '../../components/utils';
+import { hasDoseSpotIdentifier } from '../../components/shared';
 
 export function patientPathPrefix(patientId: string): string {
   return `/Patient/${patientId}`;

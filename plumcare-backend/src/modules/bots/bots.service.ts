@@ -33,7 +33,7 @@ export async function handler(medplum: MedplumClient, event: BotEvent): Promise<
   const patient = event.input as Patient;
   console.log('New patient created:', patient.name?.[0]?.given?.[0], patient.name?.[0]?.family);
 
-  // Add your email sending logic here
+  // Add email sending logic here
   return { success: true, patientId: patient.id };
 }`,
   },

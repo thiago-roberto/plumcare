@@ -13,7 +13,7 @@ import { useMedplum } from '@medplum/react';
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { PlumCareLogo } from '../components/PlumCareLogo';
+import { PlumCareLogo } from '../components/ui';
 
 export function SignInPage(): JSX.Element {
   const navigate = useNavigate();

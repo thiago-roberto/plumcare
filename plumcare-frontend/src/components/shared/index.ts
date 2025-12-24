@@ -1,0 +1,1 @@
+export { hasDoseSpotIdentifier } from './utils';

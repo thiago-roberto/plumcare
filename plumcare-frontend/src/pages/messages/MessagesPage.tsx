@@ -3,7 +3,7 @@
 import type { Communication } from '@medplum/fhirtypes';
 import type { JSX } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { ThreadInbox } from '../../components/messages/ThreadInbox';
+import { ThreadInbox } from '../../components/features/messages';
 import classes from './MessagesPage.module.css';
 /**
  * Fetches

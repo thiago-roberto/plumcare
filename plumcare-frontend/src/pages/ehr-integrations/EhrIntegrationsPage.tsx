@@ -171,6 +171,7 @@ export function EhrIntegrationsPage(): JSX.Element {
         athena: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
         elation: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
         nextgen: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
+        medplum: { patients: 0, encounters: 0, observations: 0, conditions: 0 },
       };
 
       EHR_SYSTEMS.forEach((ehr, ehrIndex) => {

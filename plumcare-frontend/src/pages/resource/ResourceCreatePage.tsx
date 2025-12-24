@@ -8,7 +8,7 @@ import { Document, Loading, useMedplum } from '@medplum/react';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { ResourceFormWithRequiredProfile } from '../../components/ResourceFormWithRequiredProfile';
+import { ResourceFormWithRequiredProfile } from '../../components/forms';
 import { usePatient } from '../../hooks/usePatient';
 import { prependPatientPath } from '../patient/PatientPage.utils';
 import { RESOURCE_PROFILE_URLS } from './utils';

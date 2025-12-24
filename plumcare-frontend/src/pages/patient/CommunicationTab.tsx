@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Communication } from '@medplum/fhirtypes';
 import type { JSX } from 'react';
-import { ThreadInbox } from '../../components/messages/ThreadInbox';
+import { ThreadInbox } from '../../components/features/messages';
 import { useNavigate, useParams } from 'react-router';
 
 export function CommunicationTab(): JSX.Element {

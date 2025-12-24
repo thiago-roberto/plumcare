@@ -10,7 +10,7 @@ import { defineConfig } from 'vitest/config';
 dns.setDefaultResultOrder('verbatim');
 
 // Resolve aliases to local packages when working within the monorepo
-const alias: NonNullable<UserConfig['resolve']>['alias'] = Object.fromEntries(
+const monorepoAliases: NonNullable<UserConfig['resolve']>['alias'] = Object.fromEntries(
   Object.entries({
     '@medplum/core': path.resolve(__dirname, '../../packages/core/src'),
     '@medplum/dosespot-react': path.resolve(__dirname, '../../packages/dosespot-react/src'),
@@ -21,6 +21,16 @@ const alias: NonNullable<UserConfig['resolve']>['alias'] = Object.fromEntries(
     '@medplum/health-gorilla-react': path.resolve(__dirname, '../../packages/health-gorilla-react/src'),
   }).filter(([, relPath]) => existsSync(relPath))
 );
+
+// Path aliases for cleaner imports
+const pathAliases: NonNullable<UserConfig['resolve']>['alias'] = {
+  '@': path.resolve(__dirname, './src'),
+  '@components': path.resolve(__dirname, './src/components'),
+  '@services': path.resolve(__dirname, './src/services'),
+  '@hooks': path.resolve(__dirname, './src/hooks'),
+  '@utils': path.resolve(__dirname, './src/utils'),
+  '@types': path.resolve(__dirname, './src/types'),
+};
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -35,7 +45,10 @@ export default defineConfig({
     port: 4000,
   },
   resolve: {
-    alias,
+    alias: {
+      ...monorepoAliases,
+      ...pathAliases,
+    },
   },
   test: {
     globals: true,

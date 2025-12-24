@@ -16,7 +16,7 @@ import { Calendar, dayjsLocalizer } from 'react-big-calendar';
 import type { Event, SlotInfo, ToolbarProps, View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { useNavigate } from 'react-router';
-import { CreateVisit } from '../../components/schedule/CreateVisit';
+import { CreateVisit } from '../../components/features/schedule';
 import { showErrorNotification } from '../../utils/notifications';
 
 type AppointmentEvent = Event & { type: 'appointment'; appointment: Appointment; start: Date; end: Date };

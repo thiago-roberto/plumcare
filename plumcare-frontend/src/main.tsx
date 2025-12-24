@@ -9,10 +9,20 @@ import '@mantine/spotlight/styles.css';
 import { MedplumClient } from '@medplum/core';
 import { MedplumProvider } from '@medplum/react';
 import '@medplum/react/styles.css';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createBrowserRouter } from 'react-router';
 import { App } from './App';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60, // 1 minute
+      retry: 1,
+    },
+  },
+});
 
 // Auto-detect Medplum base URL from environment variable
 // If not set, defaults to Medplum cloud (https://api.medplum.com/)
@@ -36,11 +46,13 @@ const container = document.getElementById('root') as HTMLDivElement;
 const root = createRoot(container);
 root.render(
   <StrictMode>
-    <MedplumProvider medplum={medplum} navigate={navigate}>
-      <MantineProvider theme={theme}>
-        <Notifications position="bottom-right" />
-        <RouterProvider router={router} />
-      </MantineProvider>
-    </MedplumProvider>
+    <QueryClientProvider client={queryClient}>
+      <MedplumProvider medplum={medplum} navigate={navigate}>
+        <MantineProvider theme={theme}>
+          <Notifications position="bottom-right" />
+          <RouterProvider router={router} />
+        </MantineProvider>
+      </MedplumProvider>
+    </QueryClientProvider>
   </StrictMode>
 );
